@@ -4,12 +4,13 @@ import { parseYouTubeVideoId } from "../shared/youtube";
 import { socket } from "../socket";
 import { useProgram } from "../useProgram";
 import { YouTubePlayer } from "../components/YouTubePlayer";
+import { appPath } from "../basePath";
 
 const TEST_ASSET: Asset = {
   id: "m0-test-graphic",
   title: "General Conference Director test graphic",
-  fullUrl: "/test-graphic.svg",
-  thumbnailUrl: "/test-graphic.svg",
+  fullUrl: appPath("test-graphic.svg"),
+  thumbnailUrl: appPath("test-graphic.svg"),
   source: "Built in",
 };
 
@@ -58,7 +59,7 @@ export function Director() {
           <span className={`connection ${connected ? "online" : "offline"}`}>
             {connected ? "Connected" : "Reconnecting…"}
           </span>
-          <a className="secondary-button" href="/output" target="_blank" rel="noreferrer">
+          <a className="secondary-button" href={appPath("output")} target="_blank" rel="noreferrer">
             Open TV output
           </a>
         </div>

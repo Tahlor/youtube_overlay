@@ -2,10 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Director } from "./pages/Director";
 import { Output } from "./pages/Output";
+import { appPath, currentAppPath } from "./basePath";
 import "./styles.css";
 
 function App() {
-  const path = window.location.pathname.replace(/\/$/, "") || "/";
+  const path = currentAppPath();
   if (path === "/director") return <Director />;
   if (path === "/output") return <Output />;
 
@@ -15,8 +16,8 @@ function App() {
       <h1>General Conference Director</h1>
       <p>Choose which screen this browser should open.</p>
       <div className="landing-actions">
-        <a className="primary-link" href="/director">Director console</a>
-        <a className="secondary-link" href="/output">TV output</a>
+        <a className="primary-link" href={appPath("director")}>Director console</a>
+        <a className="secondary-link" href={appPath("output")}>TV output</a>
       </div>
     </main>
   );
