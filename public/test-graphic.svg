@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">General Conference Director test graphic</title>
+  <desc id="desc">A simple mountain and sunrise graphic used to test the TAKE workflow.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e3a5f"/>
+      <stop offset="1" stop-color="#b9d8e8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <circle cx="800" cy="430" r="145" fill="#f7df9a"/>
+  <path d="M0 760 360 430 650 690 900 390 1250 700 1600 470 1600 900 0 900Z" fill="#334155"/>
+  <path d="M0 835 410 590 710 790 1050 555 1420 785 1600 675 1600 900 0 900Z" fill="#172033"/>
+  <text x="800" y="175" text-anchor="middle" fill="white" font-family="system-ui, sans-serif" font-size="82" font-weight="700">GENERAL CONFERENCE DIRECTOR</text>
+  <text x="800" y="265" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="40">M0 TEST GRAPHIC</text>
+</svg>
