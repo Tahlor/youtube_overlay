@@ -43,6 +43,7 @@ Both browsers load the YouTube player directly. Archimedes coordinates only Prog
 - Increment Program revision on accepted changes.
 - Broadcast the full Program state after each accepted change.
 - Send the current Program state immediately when a client connects.
+- Respond to explicit state-resync requests from already-connected clients.
 - Later: host image-provider endpoints and persistence.
 
 ## Core domain types
@@ -83,6 +84,12 @@ Clients do not need to replay event history; receiving the newest full state is 
 
 ### Client -> server
 
+`program:get-state`
+
+No payload. The server responds to that client with the complete current `program:state`.
+
+This explicit resync exists in addition to the server's automatic state message on connection. It prevents a fast connection from becoming a UI race: browser listeners are installed before the client starts connecting, and a client that is already connected when a component mounts can request the current state again safely.
+
 `program:set-video`
 
 ```ts
@@ -99,7 +106,20 @@ Clients do not need to replay event history; receiving the newest full state is 
 
 No payload.
 
-Commands should support acknowledgements so the Director can show validation failures without guessing whether Program changed.
+Mutation commands support acknowledgements so the Director can show validation failures without guessing whether Program changed.
+
+## Client connection lifecycle
+
+The Socket.IO client is created with `autoConnect: false`.
+
+The Program hook then:
+
+1. installs `program:state`, `connect`, and `disconnect` listeners;
+2. connects the socket only after those listeners exist;
+3. requests `program:get-state` on every connection;
+4. if the singleton is already connected, immediately requests state again.
+
+This ordering is intentional. Starting the socket at module-import time can allow a sufficiently fast connection to emit both `connect` and the initial Program state before React installs its listeners, leaving a page visually stuck in its initial/reconnecting state even though the underlying socket is healthy.
 
 ## State invariants
 
@@ -108,6 +128,7 @@ Commands should support acknowledgements so the Director can show validation fai
 3. Every accepted state mutation increments `revision` exactly once.
 4. Invalid commands do not mutate state.
 5. A newly connected client receives the current complete state.
+6. Any connected client can explicitly resync to the current complete state without mutating Program.
 
 ## Preview vs Program
 
