@@ -4,6 +4,16 @@ A lightweight browser-based live-program switcher for family viewing. The initia
 
 The product deliberately starts simple: both Director and Output play the original YouTube stream directly. Archimedes carries only control/state messages and, later, image-search/persistence traffic. No video transcoding or rebroadcasting is required for the MVP.
 
+## Live deployment
+
+The M0 application is deployed on Archimedes:
+
+- Director: `https://taylorarchibald.com/youtube_overlay/director`
+- TV output: `https://taylorarchibald.com/youtube_overlay/output`
+- Health: `https://taylorarchibald.com/youtube_overlay/api/healthz`
+
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for service, nginx, verification, and update details.
+
 ## MVP user flow
 
 1. Open `/director` on the directing computer.
@@ -31,6 +41,7 @@ See:
 - [`docs/PRODUCT.md`](docs/PRODUCT.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 
 ## Architectural principles
 
@@ -41,15 +52,39 @@ See:
 - Avoid video encoding/transcoding until a proven need justifies the complexity.
 - Design small provider interfaces for future image/context/AI integrations without implementing them prematurely.
 
-## Planned stack
+## Stack
 
 - React + TypeScript + Vite
 - Node.js + Express
 - Socket.IO
-- SQLite in M2
+- SQLite planned for M2
 
-For M0 the production Node process will serve both the built web app and Socket.IO/API, allowing a simple Archimedes deployment.
+The production Node process serves both the built web app and Socket.IO/API.
+
+## Local development
+
+Requirements: Node.js 22+.
+
+```bash
+npm install
+npm run dev
+```
+
+Development runs Vite on port 5173 and the application server on port 3001, with Vite proxying Socket.IO/API traffic to the server.
+
+Open:
+
+- `http://localhost:5173/director`
+- `http://localhost:5173/output`
+
+Run all checks:
+
+```bash
+npm run check
+```
+
+That command runs client/server TypeScript validation, unit tests, and a production build.
 
 ## Development status
 
-Implementation is tracked in GitHub issues. Issue #1 is the active M0 vertical slice; issue #10 contains its acceptance sequence.
+M0 is deployed and infrastructure/state-flow verified. Issue #1 tracks final M0 acceptance; issue #2 is the next product milestone for image search.
