@@ -15,14 +15,23 @@ export function useProgram() {
 
   useEffect(() => {
     const onState = (next: ProgramState) => setProgram(next);
-    const onConnect = () => setConnected(true);
+    const requestState = () => socket.emit("program:get-state");
+    const onConnect = () => {
+      setConnected(true);
+      requestState();
+    };
     const onDisconnect = () => setConnected(false);
 
     socket.on("program:state", onState);
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
 
-    if (!socket.connected) socket.connect();
+    if (socket.connected) {
+      setConnected(true);
+      requestState();
+    } else {
+      socket.connect();
+    }
 
     return () => {
       socket.off("program:state", onState);

@@ -37,6 +37,10 @@ app.get(
 io.on("connection", (socket) => {
   socket.emit("program:state", program.getState());
 
+  socket.on("program:get-state", () => {
+    socket.emit("program:state", program.getState());
+  });
+
   socket.on(
     "program:set-video",
     (payload: { videoId?: unknown }, ack?: (result: CommandAck) => void) => {
