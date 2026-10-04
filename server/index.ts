@@ -78,7 +78,6 @@ app.post(`${basePath}/api/library/favorite`, (req,res) => {
 
 const webDist = path.resolve('dist');
 app.use(basePath || '/', express.static(webDist, { index: false }));
-if (basePath) app.get(basePath, (_req,res) => res.redirect(`${basePath}/`));
 app.get([`${basePath}/`, `${basePath}/director`, `${basePath}/output`, `${basePath}/phone`], (_req,res) => {
   res.set('Cache-Control', 'no-store').sendFile(path.join(webDist, 'index.html'));
 });

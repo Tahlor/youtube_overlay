@@ -30,6 +30,12 @@ test('real prefixed server: shared state, malformed commands, rapid switching, p
   const dir=mkdtempSync(path.join(tmpdir(),'overlay-server-')); let running:Awaited<ReturnType<typeof start>>|undefined; const clients:Socket[]=[];
   try {
     running=await start(path.join(dir,'db.sqlite'));
+    const bareRoot = await fetch(`${running.url}${prefix}`, { redirect: 'manual' });
+    assert.equal(bareRoot.status, 301);
+    assert.equal(bareRoot.headers.get('location'), `${prefix}/`);
+    const appRoot = await fetch(`${running.url}${prefix}/`);
+    assert.equal(appRoot.status, 200);
+    assert.match(await appRoot.text(), /\/youtube_overlay\/assets\//);
     const director=await connect(running.url),output=await connect(running.url);clients.push(director.socket,output.socket);
     const asset={id:'test',title:'Persistent graphic',fullUrl:`${prefix}/test-graphic.svg`,source:'Built in'};
     assert.equal((await command(director.socket,'program:set-video',{videoId:'aqz-KE-bpKQ'})).ok,true);
