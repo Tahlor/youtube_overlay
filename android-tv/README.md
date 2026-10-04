@@ -5,6 +5,16 @@ This Android TV app opens only the audience output at
 link to the Director dashboard. The app runs fullscreen in landscape, keeps the
 screen awake, and loads the same live output state used by a browser on the TV.
 
+The APK uses the TV-specific output controls. Press **Back** to leave the app;
+the remote's **Home** key returns to the Superbox launcher. While watching,
+press an arrow key to reveal the small control bar, use Left/Right to select
+Pause or Mute, then press OK. Media Play/Pause and Mute keys also work. Pause
+is local to this TV: resuming rejoins the Director's current playback position.
+The YouTube embed's full controls remain hidden so viewers cannot seek or choose
+another video. YouTube's documented embed API does not offer a supported
+captions on/off method; captions that the stream/video provides remain under
+YouTube's own caption behavior.
+
 Build a debug APK with Android SDK Platform 35 and JDK 17:
 
 ```powershell

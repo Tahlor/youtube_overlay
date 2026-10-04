@@ -313,7 +313,8 @@ main.output-shell.broadcast-output.broadcast-output {
 .output-shell.broadcast-output.broadcast-output.corner-bottom-right .audience-info-card { top: 44px; bottom: auto; }
 
 .output-shell.broadcast-output.broadcast-output .audience-toolbar,
-.output-shell.broadcast-output.broadcast-output .audience-recovery {
+.output-shell.broadcast-output.broadcast-output .audience-recovery,
+.output-shell.broadcast-output.broadcast-output .audience-tv-controls {
   position: absolute;
   z-index: 8;
   display: flex;
@@ -326,6 +327,42 @@ main.output-shell.broadcast-output.broadcast-output {
   border: 1px solid rgba(255,255,255,.2);
   border-radius: 9px;
   backdrop-filter: blur(10px);
+}
+
+.output-shell.broadcast-output.broadcast-output .audience-tv-controls {
+  left: 50%;
+  bottom: 5vh;
+  max-width: calc(100% - 32px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 5px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.output-shell.broadcast-output.broadcast-output .audience-tv-controls.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+.output-shell.broadcast-output.broadcast-output .audience-tv-controls button,
+.output-shell.broadcast-output.broadcast-output .audience-tv-controls span {
+  padding: 9px 14px;
+  border: 1px solid rgba(255,255,255,.3);
+  border-radius: 7px;
+  color: #fff;
+  background: rgba(255,255,255,.1);
+  white-space: nowrap;
+}
+.output-shell.broadcast-output.broadcast-output .audience-tv-controls button.is-selected {
+  border-color: #fff;
+  outline: 3px solid rgba(255,255,255,.65);
+  background: rgba(255,255,255,.24);
+}
+.output-shell.broadcast-output.broadcast-output .audience-tv-controls .audience-tv-hint {
+  padding-inline: 8px;
+  border: 0;
+  color: rgba(255,255,255,.78);
+  background: transparent;
+  font-size: .72rem;
 }
 
 .output-shell.broadcast-output.broadcast-output .audience-toolbar {

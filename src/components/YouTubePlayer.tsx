@@ -7,10 +7,11 @@ import { sendCommand } from '../commands';
 interface Player {
   playVideo(): void; pauseVideo(): void; seekTo(seconds: number, allowSeekAhead: boolean): void;
   getCurrentTime(): number; getDuration(): number; getPlayerState(): number;
-  mute(): void; unMute(): void; setVolume(volume: number): void; destroy(): void;
+  mute(): void; unMute(): void; isMuted(): boolean; setVolume(volume: number): void; destroy(): void;
 }
 interface API { Player: new (iframe: HTMLIFrameElement, options: { events: Record<string, (event: { data: number; target: Player }) => void> }) => Player }
 declare global { interface Window { YT?: API; onYouTubeIframeAPIReady?: () => void } }
+declare global { interface Window { __YT_TV_REMOTE_KEY__?: (key: string) => void } }
 let apiPromise: Promise<API> | null = null;
 function loadAPI(): Promise<API> {
   if (window.YT?.Player) return Promise.resolve(window.YT);
@@ -30,9 +31,9 @@ interface Props {
   videoId: string | null; title: string; muted?: boolean; volume?: number; className?: string;
   playback: PlaybackState; connected: boolean; clockOffset: number;
   outputPlayback?: OutputPlayback | null; onSample?: (sample: PlaybackSample) => void;
-  audience?: boolean; compact?: boolean;
+  audience?: boolean; compact?: boolean; tvControls?: boolean;
 }
-export function YouTubePlayer({ videoId, title, muted = false, volume = 100, className = '', playback, connected, clockOffset, outputPlayback, onSample, audience = false, compact = false }: Props) {
+export function YouTubePlayer({ videoId, title, muted = false, volume = 100, className = '', playback, connected, clockOffset, outputPlayback, onSample, audience = false, compact = false, tvControls = false }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Player | null>(null);
   const readyRef = useRef(false);
@@ -49,6 +50,12 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
   const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [audienceToolbarVisible, setAudienceToolbarVisible] = useState(false);
+  const [tvSelectedControl, setTvSelectedControl] = useState<'play' | 'mute'>('play');
+  const [tvPaused, setTvPaused] = useState(false);
+  const [tvMuted, setTvMuted] = useState(muted);
+  const tvPausedRef = useRef(false);
+  const tvMutedRef = useRef(muted);
+  const tvRemoteKeyRef = useRef<(key: string) => void>(() => {});
   const audienceToolbarTimer = useRef<number | null>(null);
   const latest = useRef({ videoId, playback, connected, clockOffset, onSample, status });
   latest.current = { videoId, playback, connected, clockOffset, onSample, status };
@@ -58,7 +65,7 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
   const scheduleAudienceToolbarHide = useCallback((delay = 2500) => {
     if (audienceToolbarTimer.current !== null) window.clearTimeout(audienceToolbarTimer.current);
     audienceToolbarTimer.current = window.setTimeout(() => {
-      const toolbar = container.current?.closest('[data-broadcast-output]')?.querySelector('.audience-toolbar');
+      const toolbar = container.current?.closest('[data-broadcast-output]')?.querySelector(tvControls ? '.audience-tv-controls' : '.audience-toolbar');
       if (toolbar?.contains(document.activeElement)) return;
       setAudienceToolbarVisible(false);
       audienceToolbarTimer.current = null;
@@ -68,6 +75,73 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
     setAudienceToolbarVisible(true);
     scheduleAudienceToolbarHide();
   }, [scheduleAudienceToolbarHide]);
+
+  function toggleTvPause() {
+    if (!tvControls || !readyRef.current || !player.current) return;
+    if (tvPausedRef.current) {
+      tvPausedRef.current = false;
+      setTvPaused(false);
+      applyPlayback(player.current);
+    } else {
+      tvPausedRef.current = true;
+      setTvPaused(true);
+      player.current.pauseVideo();
+    }
+  }
+
+  function toggleTvMute() {
+    if (!tvControls || !readyRef.current || !player.current) return;
+    const nextMuted = !tvMuted;
+    tvMutedRef.current = nextMuted;
+    setTvMuted(nextMuted);
+    if (nextMuted) player.current.mute(); else player.current.unMute();
+  }
+
+  tvRemoteKeyRef.current = (key) => {
+    if (!tvControls) return;
+    if (key === 'mute') {
+      setTvSelectedControl('mute');
+      setAudienceToolbarVisible(true);
+      scheduleAudienceToolbarHide();
+      toggleTvMute();
+      return;
+    }
+    if (key === 'play-pause') {
+      setTvSelectedControl('play');
+      setAudienceToolbarVisible(true);
+      scheduleAudienceToolbarHide();
+      toggleTvPause();
+      return;
+    }
+    if (key === 'play') {
+      if (tvPausedRef.current) toggleTvPause();
+      return;
+    }
+    if (key === 'pause') {
+      if (!tvPausedRef.current) toggleTvPause();
+      return;
+    }
+    if (!['left', 'right', 'up', 'down', 'center'].includes(key)) return;
+    if (!audienceToolbarVisible) {
+      setTvSelectedControl('play');
+      setAudienceToolbarVisible(true);
+      scheduleAudienceToolbarHide();
+      return;
+    }
+    if (key === 'left' || key === 'right') {
+      setTvSelectedControl((current) => current === 'play' ? 'mute' : 'play');
+      scheduleAudienceToolbarHide();
+    } else if (key === 'center') {
+      if (tvSelectedControl === 'play') toggleTvPause(); else toggleTvMute();
+      scheduleAudienceToolbarHide();
+    }
+  };
+
+  useEffect(() => {
+    if (!tvControls) return;
+    window.__YT_TV_REMOTE_KEY__ = (key) => tvRemoteKeyRef.current(key);
+    return () => { delete window.__YT_TV_REMOTE_KEY__; };
+  }, [tvControls]);
 
   useEffect(() => {
     if (!audience) return;
@@ -94,6 +168,10 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
       const seekTarget = (dur && isVideoTime(dur) && position >= dur - 3) ? dur : Math.min(position, dur || position);
       target.seekTo(seekTarget, true);
     }
+    if (audience && tvControls && tvPausedRef.current) {
+      target.pauseVideo();
+      return;
+    }
     if (next.status === 'paused') target.pauseVideo(); else target.playVideo();
   }
 
@@ -111,6 +189,7 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
 
   useEffect(() => {
     readyRef.current = false; setReady(false); setSample(null); setSeekDraft(null); setError(null);
+    tvPausedRef.current = false; setTvPaused(false);
     seekDraftRef.current = null;
     appliedRevision.current = -1;
     if (!videoId || !container.current) return;
@@ -130,8 +209,8 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
         onReady: ({ target }) => {
           if (disposed) return;
           readyRef.current = true; setReady(true);
-          target.setVolume(audioSettings.current.volume);
-          if (audioSettings.current.muted) target.mute(); else target.unMute();
+      target.setVolume(audioSettings.current.volume);
+          if (tvControls ? tvMutedRef.current : audioSettings.current.muted) target.mute(); else target.unMute();
           setStatus('Ready. Press Start video if playback is paused.');
           applyPlayback(target);
         },
@@ -141,8 +220,8 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
           else if (data === 0) setStatus('Video ended. Seek backward to replay or choose another video.');
           else if (data === 2) { clearTimeout(startup); setStatus('Paused'); }
           else if (data === 3) setStatus('Buffering…');
-          // Native YouTube play/pause also controls the shared Program. Ignore echoes of our own commands.
-          if (Date.now() > ignoreNativeUntil.current && latest.current.connected && readyRef.current) {
+          // The Director output accepts native player controls; the TV app keeps its local controls private.
+          if (!(audience && tvControls) && Date.now() > ignoreNativeUntil.current && latest.current.connected && readyRef.current) {
             if (data === 2 && latest.current.playback.status === 'playing') void controlRef.current('pause');
             if (data === 1 && latest.current.playback.status === 'paused') void controlRef.current('play');
           } else if (data === 1 && latest.current.playback.status === 'paused') target.pauseVideo();
@@ -164,7 +243,7 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
       const next: PlaybackSample = { videoId, playbackRevision: latest.current.playback.revision, currentTime: time, duration, playerState: state, status: latest.current.status };
       setSample(next);
       // Detect native scrubbing; buffering and commanded seeks must not generate new commands.
-      if (lastSample && state === lastSample.state && (state === 1 || state === 2) && now > ignoreNativeUntil.current && latest.current.connected) {
+      if (!(audience && tvControls) && lastSample && state === lastSample.state && (state === 1 || state === 2) && now > ignoreNativeUntil.current && latest.current.connected) {
         const expected = lastSample.time + (state === 1 ? (now - lastSample.at) / 1000 : 0);
         if (Math.abs(time - expected) > 4) void controlRef.current('seek', { position: time });
       }
@@ -175,13 +254,21 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
       disposed = true; readyRef.current = false; clearTimeout(startup); clearInterval(poll);
       player.current?.destroy(); player.current = null; container.current?.replaceChildren();
     };
-  }, [videoId, title, retry, audience]);
+  }, [videoId, title, retry, audience, tvControls]);
 
   useEffect(() => {
     if (!readyRef.current || !player.current) return;
     player.current.setVolume(volume);
-    if (muted) player.current.mute(); else player.current.unMute();
-  }, [muted, volume]);
+    if (tvControls ? tvMutedRef.current : muted) player.current.mute(); else player.current.unMute();
+  }, [muted, volume, tvControls]);
+
+  useEffect(() => {
+    if (!audience || !tvControls) return;
+    return () => {
+      tvPausedRef.current = false;
+      if (audienceToolbarTimer.current !== null) window.clearTimeout(audienceToolbarTimer.current);
+    };
+  }, [audience, tvControls, videoId]);
 
   useEffect(() => {
     if (readyRef.current && player.current && appliedRevision.current !== playback.revision) applyPlayback(player.current);
@@ -239,7 +326,14 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
     if (!target?.requestFullscreen) return;
     void target.requestFullscreen().catch(() => revealAudienceToolbar());
   }
-  const audienceOverlay = audience && audienceRoot ? createPortal(recoveryNeeded ? <div className="audience-recovery" role="status">
+  const tvAudienceOverlay = tvControls ? <div className={`audience-tv-controls ${audienceToolbarVisible ? 'is-visible' : ''}`} role="toolbar" aria-label="TV video controls">
+    {recoveryNeeded && <span role="status">{status}</span>}
+    {recoveryNeeded && <button onClick={startVideo}>Start stream</button>}
+    <button className={tvSelectedControl === 'play' ? 'is-selected' : ''} onClick={toggleTvPause}>{tvPaused ? 'Resume with director' : 'Pause here'}</button>
+    <button className={tvSelectedControl === 'mute' ? 'is-selected' : ''} onClick={toggleTvMute}>{tvMuted ? 'Unmute' : 'Mute'}</button>
+    <span className="audience-tv-hint">Left/Right choose · OK select · Back exit</span>
+  </div> : null;
+  const audienceOverlayContent = tvControls ? tvAudienceOverlay : recoveryNeeded ? <div className="audience-recovery" role="status">
     <span>{status}</span>
     <button onClick={startVideo}>Start video</button>
     <button onClick={() => setRetry(value => value + 1)}>Retry player</button>
@@ -254,7 +348,8 @@ export function YouTubePlayer({ videoId, title, muted = false, volume = 100, cla
     <button onClick={requestAudienceFullscreen}>Fullscreen</button>
     <button onClick={() => setRetry(value => value + 1)}>Retry player</button>
     <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noreferrer">Open YouTube</a>
-  </div>, audienceRoot) : null;
+  </div>;
+  const audienceOverlay = audience && audienceRoot ? createPortal(audienceOverlayContent, audienceRoot) : null;
 
   return <div className={`youtube-player ${audience ? 'audience-player' : ''} ${compact ? 'compact-player' : ''} ${className}`}>
     <div ref={container} className="youtube-frame" />

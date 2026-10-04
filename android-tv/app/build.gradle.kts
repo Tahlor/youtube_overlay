@@ -13,7 +13,7 @@ android {
         targetSdk = 32
         versionCode = 1
         versionName = "1.0.0"
-        buildConfigField("String", "OUTPUT_URL", "\"https://taylorarchibald.com/youtube_overlay/output\"")
+        buildConfigField("String", "OUTPUT_URL", "\"https://taylorarchibald.com/youtube_overlay/output?tv=1\"")
     }
 
     buildFeatures {

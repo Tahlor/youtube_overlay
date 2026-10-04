@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -15,6 +16,8 @@ import android.webkit.WebViewClient
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
+    private var pageReady = false
+    private var pendingRemoteKey: String? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,6 +41,13 @@ class MainActivity : Activity() {
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    super.onPageFinished(view, url)
+                    pageReady = true
+                    pendingRemoteKey?.let { dispatchRemoteKey(it) }
+                    pendingRemoteKey = null
+                }
+
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: WebResourceRequest,
@@ -80,6 +90,49 @@ class MainActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) enterImmersiveMode()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && !event.isCanceled) {
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                finish()
+                return true
+            }
+            val remoteKey = when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> "left"
+                KeyEvent.KEYCODE_DPAD_RIGHT -> "right"
+                KeyEvent.KEYCODE_DPAD_UP -> "up"
+                KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> "center"
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> "play-pause"
+                KeyEvent.KEYCODE_MEDIA_PLAY -> "play"
+                KeyEvent.KEYCODE_MEDIA_PAUSE -> "pause"
+                KeyEvent.KEYCODE_VOLUME_MUTE -> "mute"
+                else -> null
+            }
+            if (remoteKey != null) {
+                if (event.repeatCount > 0) return true
+                if (pageReady) dispatchRemoteKey(remoteKey) else pendingRemoteKey = remoteKey
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun dispatchRemoteKey(key: String) {
+        val safeKey = org.json.JSONObject.quote(key)
+        webView.evaluateJavascript(
+            "(() => { const key = $safeKey; let attempts = 0; const send = () => { " +
+                "if (window.__YT_TV_REMOTE_KEY__) window.__YT_TV_REMOTE_KEY__(key); " +
+                "else if (attempts++ < 30) setTimeout(send, 100); }; send(); })()",
+            null,
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        // This app contains only the audience output. Back always returns to the launcher.
+        finish()
     }
 
     override fun onDestroy() {

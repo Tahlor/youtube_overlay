@@ -17,7 +17,7 @@ async function start() {
 }
 async function stop() { if (server?.exitCode === null) await new Promise(resolve => { server.once('exit', resolve); server.kill(); }); }
 const base = process.env.BASE_URL ?? await start();
-const browser = await chromium.launch({ executablePath: '/usr/local/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/usr/local/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 if (process.env.DIRECTOR_ACCESS_KEY) await context.addInitScript(key => localStorage.setItem('overlay-director-access', key), process.env.DIRECTOR_ACCESS_KEY);
 // A deterministic IFrame API validates commands and recovery without claiming real YouTube media playback.
@@ -25,7 +25,7 @@ await context.addInitScript(() => {
   window.__players = [];
   window.YT = { Player: class {
     constructor(frame, { events }) {
-      this.events = events; this.time = 240; this.state = -1; this.at = Date.now(); this.frame = frame; this.seeks = [];
+      this.events = events; this.time = 240; this.state = -1; this.at = Date.now(); this.frame = frame; this.seeks = []; this.muted = false;
       window.__players.push(this); setTimeout(() => events.onReady({ target: this }), 30);
     }
     getCurrentTime() { return Math.min(7200, this.time + (this.state === 1 ? (Date.now() - this.at) / 1000 : 0)); }
@@ -33,18 +33,18 @@ await context.addInitScript(() => {
     playVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 1; this.events.onStateChange({ data: 1, target: this }); }
     pauseVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 2; this.events.onStateChange({ data: 2, target: this }); }
     seekTo(time) { this.time = time; this.at = Date.now(); this.seeks.push(time); }
-    mute() {} unMute() {} setVolume() {} destroy() { this.frame.remove(); }
+    mute() { this.muted = true; } unMute() { this.muted = false; } isMuted() { return this.muted; } setVolume() {} destroy() { this.frame.remove(); }
   } };
 });
-const director = await context.newPage(), output = await context.newPage();
-const errors = []; for (const page of [director, output]) page.on('pageerror', error => errors.push(error.message));
+const director = await context.newPage(), output = await context.newPage(), tvOutput = await context.newPage();
+const errors = []; for (const page of [director, output, tvOutput]) page.on('pageerror', error => errors.push(error.message));
 const observations = [];
 function record(message) { observations.push(message); console.log(message); }
 async function waitPosition(page, time, state = 2) {
   await page.waitForFunction(({ time, state }) => { const player = window.__players.at(-1); return player?.state === state && Math.abs(player.getCurrentTime() - time) < (state === 1 ? 5 : 1); }, { time, state });
 }
 try {
-  await Promise.all([director.goto(`${base}/director`, { waitUntil: 'domcontentloaded' }), output.goto(`${base}/output`, { waitUntil: 'domcontentloaded' })]);
+  await Promise.all([director.goto(`${base}/director`, { waitUntil: 'domcontentloaded' }), output.goto(`${base}/output`, { waitUntil: 'domcontentloaded' }), tvOutput.goto(`${base}/output?tv=1`, { waitUntil: 'domcontentloaded' })]);
   await director.getByText('Connected', { exact: true }).waitFor();
   await director.getByLabel('YouTube stream or video').fill('aqz-KE-bpKQ'); await director.getByRole('button', { name: 'Set video', exact: true }).click();
   await director.waitForFunction(() => !document.querySelector('.play-pause')?.disabled);
@@ -106,8 +106,27 @@ try {
   await director.waitForFunction(() => !document.querySelector('.take-button').disabled);
   await director.locator('h1').click(); await director.keyboard.press('Enter');
   await output.locator('.output-shell.graphic-mode.layout-image').waitFor();
+  await director.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur());
   await director.keyboard.press('Escape'); await output.locator('.output-shell.live-mode').waitFor();
   record('Merged switcher shortcuts retain playback, live head, force sync, layouts and TAKE/LIVE');
+  await tvOutput.waitForFunction(() => window.__players.at(-1)?.state === 1);
+  await tvOutput.evaluate(() => window.__YT_TV_REMOTE_KEY__('up'));
+  await tvOutput.locator('.audience-tv-controls.is-visible').waitFor();
+  await tvOutput.evaluate(() => window.__YT_TV_REMOTE_KEY__('right'));
+  await tvOutput.evaluate(() => window.__YT_TV_REMOTE_KEY__('center'));
+  await tvOutput.waitForFunction(() => window.__players.at(-1)?.isMuted() === true);
+  await tvOutput.evaluate(() => window.__YT_TV_REMOTE_KEY__('play-pause'));
+  await tvOutput.waitForFunction(() => window.__players.at(-1)?.state === 2);
+  await director.waitForFunction(() => document.querySelector('.play-pause')?.textContent.includes('Pause'));
+  const locallyPausedAt = await tvOutput.evaluate(() => window.__players.at(-1).getCurrentTime());
+  await tvOutput.waitForTimeout(900);
+  assert.ok(Math.abs(await tvOutput.evaluate(() => window.__players.at(-1).getCurrentTime()) - locallyPausedAt) < .05);
+  await director.getByLabel('Seek to time', { exact: true }).fill('7:00'); await director.getByRole('button', { name: 'Seek', exact: true }).click();
+  await tvOutput.waitForFunction(() => window.__players.at(-1)?.state === 2 && Math.abs(window.__players.at(-1).getCurrentTime() - 420) < 1);
+  await tvOutput.evaluate(() => window.__YT_TV_REMOTE_KEY__('play-pause'));
+  await tvOutput.waitForFunction(() => window.__players.at(-1)?.state === 1 && Math.abs(window.__players.at(-1).getCurrentTime() - 420) < 2);
+  await director.waitForFunction(() => document.querySelector('.play-pause')?.textContent.includes('Pause'));
+  record('TV D-pad, mute and local pause work; resuming rejoins the Director position without changing shared playback');
   await director.setViewportSize({ width: 390, height: 844 }); await director.screenshot({ path: path.join(evidence, 'director-mobile.png'), fullPage: true });
   assert.equal(await director.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await director.setViewportSize({ width: 1440, height: 1000 }); await director.screenshot({ path: path.join(evidence, 'director.png'), fullPage: true });

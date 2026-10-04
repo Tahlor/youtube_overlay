@@ -13,6 +13,7 @@ const TRANSITION_MS = 350;
 
 export function Output() {
   const { program, connected, clockOffset, reportPlayback } = useProgram();
+  const tvControls = new URLSearchParams(window.location.search).get('tv') === '1';
   const presentation = program.presentation ?? DEFAULT_PRESENTATION;
   const selected = program.source ?? 'youtube';
   const audio = program.audio;
@@ -86,6 +87,7 @@ export function Output() {
         onSample={cameraFallback ? undefined : reportPlayback}
         muted={audioSource !== 'youtube' || level.muted || level.volume === 0}
         volume={audioSource === 'youtube' ? level.volume : 0}
+        tvControls={tvControls}
         audience
       /> : <div className="camera-output">
         <video ref={cameraVideoRef} autoPlay playsInline muted
