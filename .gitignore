@@ -11,3 +11,13 @@ data/
 .browser-evidence/
 .broadcast-evidence/
 .playback-evidence/
+.browser-evidence*/
+.toolchain/
+.playwright/
+.npm-cache/
+android-tv/local.properties
+android-tv/.gradle/
+android-tv/**/build/
+.android-sdk/
+.gradle-cache/
+.build-tmp/

@@ -10,9 +10,14 @@ The M0–M3 application is deployed on Archimedes:
 
 - Director: `https://taylorarchibald.com/youtube_overlay/director`
 - TV output: `https://taylorarchibald.com/youtube_overlay/output`
+- Android TV APK: `https://taylorarchibald.com/youtube_overlay/downloads/youtube-overlay-tv.apk`
 - Health: `https://taylorarchibald.com/youtube_overlay/api/healthz`
 
 See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for service, nginx, verification, and update details.
+
+The app landing page also links to the Android TV APK. It opens the audience
+output directly and does not include the Director console. Build/install notes
+are in [`android-tv/README.md`](android-tv/README.md).
 
 ## MVP user flow
 

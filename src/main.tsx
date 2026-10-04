@@ -18,6 +18,9 @@ function App() {
       <div className="landing-actions">
         <a className="primary-link" href={appPath("director")}>Director console</a>
         <a className="secondary-link" href={appPath("output")}>TV output</a>
+        <a className="download-link" href={appPath("downloads/youtube-overlay-tv.apk")} download>
+          Download Superbox APK
+        </a>
       </div>
     </main>
   );

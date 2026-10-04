@@ -7,6 +7,7 @@ The M0–M3 application is deployed on Archimedes as a single Node process behin
 - App root: `https://taylorarchibald.com/youtube_overlay/`
 - Director: `https://taylorarchibald.com/youtube_overlay/director`
 - TV output: `https://taylorarchibald.com/youtube_overlay/output`
+- Android TV APK: `https://taylorarchibald.com/youtube_overlay/downloads/youtube-overlay-tv.apk`
 - Health: `https://taylorarchibald.com/youtube_overlay/api/healthz`
 - Socket.IO path: `/youtube_overlay/socket.io`
 
