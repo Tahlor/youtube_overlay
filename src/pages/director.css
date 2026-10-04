@@ -252,6 +252,10 @@
 .compact-director .audio-mixer-row button.audio-muted { border-color: #87434b; background: #47232a; color: #fecaca; }
 .compact-director .phone-invite-content { max-height: 180px; margin-top: 4px; padding: 6px; overflow-y: auto; border: 1px solid #26364c; border-radius: 6px; background: #091321; }
 .compact-director .phone-invite-content > p { margin: 0 0 5px; color: #879bb5; font-size: .6rem; line-height: 1.3; }
+.compact-director .director-access { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; margin-bottom: 7px; }
+.compact-director .director-access label { grid-column: 1 / -1; color: #d5e1ef; font-size: .61rem; }
+.compact-director .director-access input { min-width: 0; height: 27px; padding: 4px 6px; border: 1px solid #34445c; border-radius: 5px; background: #050b14; color: #e6f1ff; }
+.compact-director .director-access button { padding: 5px 8px; border: 1px solid #385271; border-radius: 5px; background: #173253; color: #e6f1ff; font-size: .61rem; }
 .compact-director .phone-invite-row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 5px; margin-top: 5px; }
 .compact-director .phone-invite-row label { overflow: hidden; color: #d5e1ef; font-size: .59rem; text-overflow: ellipsis; }
 .compact-director .phone-invite-row input { min-width: 0; height: 25px; padding: 4px 6px; border: 1px solid #34445c; border-radius: 5px; background: #050b14; color: #a9bed7; font-size: .55rem; }

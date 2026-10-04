@@ -1,4 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { Server, Socket } from 'socket.io';
 import type { CameraSource, InputSource, ProgramState } from '../src/shared/types.js';
 import { CAMERA_SOURCES, effectiveAudioSource, isCameraSource } from '../src/shared/input.js';
@@ -15,12 +17,14 @@ interface SignalingProgram {
 
 export interface InputSignalingManager {
   isAvailable(source: CameraSource): boolean;
+  isDirector(socketId: string): boolean;
   getAvailability(): Record<CameraSource, boolean>;
   refreshAccess(): void;
 }
 
 interface Options {
   basePath: string;
+  directorKey: string | null;
   onSelectedCameraDisconnected(source: CameraSource): void;
 }
 
@@ -40,6 +44,7 @@ export function attachInputSignaling(io: Server, program: SignalingProgram, opti
 
   const manager: InputSignalingManager = {
     isAvailable: source => broadcasters.has(source),
+    isDirector: socketId => directors.has(socketId),
     getAvailability: () => Object.fromEntries(CAMERA_SOURCES.map(source => [source, broadcasters.has(source)])) as Record<CameraSource, boolean>,
     refreshAccess: () => {
       const state = program.getState();
@@ -123,9 +128,15 @@ export function attachInputSignaling(io: Server, program: SignalingProgram, opti
   io.on('connection', (socket: InputSocket) => {
     socket.emit('input:availability', manager.getAvailability());
 
-    socket.on('input:director', (ack?: unknown) => {
+    socket.on('input:director', (payloadOrAck?: { key?: unknown } | Acknowledge, ack?: unknown) => {
+      const callback = typeof payloadOrAck === 'function' ? payloadOrAck : ack;
+      const candidate = typeof payloadOrAck === 'object' ? payloadOrAck?.key : undefined;
+      if (options.directorKey && !matchesToken(candidate, options.directorKey)) {
+        reject(socket, callback, 'Director access key required. Open your private Director link or enter the key.');
+        return;
+      }
       directors.add(socket.id);
-      if (typeof ack === 'function') (ack as Acknowledge)({ ok: true });
+      if (typeof callback === 'function') (callback as Acknowledge)({ ok: true });
       socket.emit('input:availability', manager.getAvailability());
     });
 
@@ -252,6 +263,19 @@ export function attachInputSignaling(io: Server, program: SignalingProgram, opti
   }
 
   return manager;
+}
+
+export function directorAccessKey(dataPath: string): string | null {
+  const configured = process.env.DIRECTOR_ACCESS_KEY;
+  if (configured) return configured;
+  if (process.env.NODE_ENV !== 'production') return null;
+  const filename = path.join(path.dirname(dataPath), 'director-access-key');
+  mkdirSync(path.dirname(filename), { recursive: true });
+  try { writeFileSync(filename, randomBytes(32).toString('base64url'), { flag: 'wx', mode: 0o600 }); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+  const key = readFileSync(filename, 'utf8').trim();
+  if (!key) throw new Error('Director access key file is empty.');
+  return key;
 }
 
 function matchesToken(candidate: unknown, expectedToken: string): boolean {

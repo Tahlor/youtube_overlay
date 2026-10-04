@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Asset, CameraSource, InputSource, PresentationSettings } from "../shared/types";
 import { DEFAULT_PRESENTATION } from "../shared/presentation";
 import { CAMERA_SOURCES, INPUT_SOURCES, effectiveAudioSource } from "../shared/input";
@@ -17,6 +17,21 @@ import "./director.css";
 
 export function Director() {
   const { program, connected, clockOffset, outputPlayback } = useProgram();
+  const [accessKey, setAccessKey] = useState(() => {
+    const url = new URL(window.location.href);
+    const fragment = new URLSearchParams(url.hash.replace(/^#/, ''));
+    const supplied = fragment.get('access');
+    if (supplied) {
+      window.localStorage.setItem('overlay-director-access', supplied);
+      fragment.delete('access');
+      url.hash = fragment.toString();
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+      return supplied;
+    }
+    return window.localStorage.getItem('overlay-director-access') ?? '';
+  });
+  const [accessDraft, setAccessDraft] = useState(accessKey);
+  const [directorClaimed, setDirectorClaimed] = useState(false);
   const [videoInput, setVideoInput] = useState("");
   const [preview, setPreview] = useState<Asset | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,21 +68,32 @@ export function Director() {
   }, [program.audio.levels, audioAdjusting]);
 
   useEffect(() => {
-    const claimDirector = () => socket.emit("input:director", (result?: { ok?: boolean; error?: string }) => {
-      if (!result?.ok) setInputError(result?.error ?? "Director connection could not be claimed. Reconnect and try again.");
+    const claimDirector = () => socket.emit("input:director", { key: accessKey }, (result?: { ok?: boolean; error?: string }) => {
+      setDirectorClaimed(Boolean(result?.ok));
+      if (!result?.ok) setInputError(result?.error ?? "Director access could not be confirmed. Reconnect and try again.");
       else setInputError(null);
     });
+    const onDisconnect = () => setDirectorClaimed(false);
     const onAvailability = (next: Partial<Record<CameraSource, boolean>>) => {
       setAvailability(current => ({ ...current, ...next }));
     };
     socket.on("connect", claimDirector);
+    socket.on("disconnect", onDisconnect);
     socket.on("input:availability", onAvailability);
     if (socket.connected) claimDirector();
     return () => {
       socket.off("connect", claimDirector);
+      socket.off("disconnect", onDisconnect);
       socket.off("input:availability", onAvailability);
     };
-  }, []);
+  }, [accessKey]);
+
+  function saveAccessKey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = accessDraft.trim();
+    window.localStorage.setItem('overlay-director-access', next);
+    setAccessKey(next);
+  }
 
   useEffect(() => {
     const previous = lastProgramSource.current;
@@ -273,7 +299,7 @@ export function Director() {
                   className={`source-choice ${selected ? "selected" : ""}`}
                   aria-pressed={selected}
                   onClick={() => selectSource(source)}
-                  disabled={!connected}
+                  disabled={!connected || !directorClaimed}
                 >
                   <span className={`source-dot ${live ? "source-online" : "source-offline"}`} aria-hidden="true" />
                   <span>{source === 'director' ? 'Webcam' : sourceLabel(source)}</span>
@@ -326,7 +352,7 @@ export function Director() {
             {directorStream ? (
               <button type="button" className="camera-stop" onClick={broadcaster.stop}>Stop webcam</button>
             ) : (
-              <button type="button" onClick={() => void startDirectorInput()} disabled={!connected || broadcaster.status === "requesting" || broadcaster.status === "connecting"}>
+              <button type="button" onClick={() => void startDirectorInput()} disabled={!connected || !directorClaimed || broadcaster.status === "requesting" || broadcaster.status === "connecting"}>
                 {broadcaster.status === "requesting" ? "Waiting for permission…" : "Start webcam"}
               </button>
             )}
@@ -337,7 +363,7 @@ export function Director() {
               <input
                 type="checkbox"
                 checked={audio.followSelected}
-                disabled={!connected}
+                disabled={!connected || !directorClaimed}
                 onChange={event => void command("program:set-audio", event.target.checked
                   ? { followSelected: true }
                   : { followSelected: false, audioSource: program.source })}
@@ -349,7 +375,7 @@ export function Director() {
               <select
                 aria-label="Audio source"
                 value={audio.source}
-                disabled={!connected || audio.followSelected}
+                disabled={!connected || !directorClaimed || audio.followSelected}
                 onChange={event => void command("program:set-audio", { audioSource: event.target.value as InputSource })}
               >
                 {INPUT_SOURCES.map(source => (
@@ -380,14 +406,14 @@ export function Director() {
                       onKeyDown={() => setAudioAdjusting(source)}
                       onKeyUp={() => saveAudioVolume(source)}
                       onBlur={() => { if (audioAdjusting === source) saveAudioVolume(source); }}
-                      disabled={!connected}
+                      disabled={!connected || !directorClaimed}
                     />
                     <output>{level.volume}%</output>
                     <button
                       type="button"
                       className={level.muted ? "audio-muted" : ""}
                       aria-pressed={level.muted}
-                      disabled={!connected}
+                      disabled={!connected || !directorClaimed}
                       onClick={() => void command("program:set-audio", { source, muted: !level.muted })}
                     >{level.muted ? "Muted" : "Mute"}</button>
                   </div>
@@ -400,7 +426,12 @@ export function Director() {
             <summary>Phone camera links</summary>
             <div className="phone-invite-content">
               <p>Each link is private to this session and opens one assigned phone input.</p>
-              <button type="button" onClick={requestPhoneInvites} disabled={!connected || inviteBusy}>
+              {!directorClaimed && <form className="director-access" onSubmit={saveAccessKey}>
+                <label htmlFor="director-access-key">Director camera access key</label>
+                <input id="director-access-key" type="password" autoComplete="off" value={accessDraft} onChange={event => setAccessDraft(event.target.value)} />
+                <button type="submit">Unlock cameras</button>
+              </form>}
+              <button type="button" onClick={requestPhoneInvites} disabled={!connected || !directorClaimed || inviteBusy}>
                 {inviteBusy ? "Creating links…" : Object.keys(inviteLinks).length ? "Refresh phone links" : "Create phone links"}
               </button>
               {inviteError && <p className="input-error" role="alert">{inviteError}</p>}

@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { io, type Socket } from 'socket.io-client';
 import type { CommandAck, ProgramState, PlaybackCommand, OutputPlayback } from '../src/shared/types.js';
 const prefix='/youtube_overlay';
-async function start(data: string) {
-  const child=spawn(process.execPath,['--import','tsx','server/index.ts'],{env:{...process.env,PORT:'0',HOST:'127.0.0.1',BASE_PATH:prefix,DATA_PATH:data},stdio:['ignore','pipe','pipe']});
+async function start(data: string, extraEnv: Record<string, string> = {}) {
+  const child=spawn(process.execPath,['--import','tsx','server/index.ts'],{env:{...process.env,PORT:'0',HOST:'127.0.0.1',BASE_PATH:prefix,DATA_PATH:data,...extraEnv},stdio:['ignore','pipe','pipe']});
   const url=await new Promise<string>((resolve,reject)=>{
     const timer=setTimeout(()=>reject(new Error('Server startup timeout')),10000);
     child.stdout!.on('data',chunk=>{ const match=String(chunk).match(/http:\/\/127.0.0.1:(\d+)/); if(match){clearTimeout(timer);resolve(`http://127.0.0.1:${match[1]}`);} });
@@ -141,6 +141,7 @@ test('phone invites are source-specific and a disconnected on-air camera returns
     assert.ok(token);
     assert.equal((await command(phone.socket, 'input:join', { source: 'phone2', token })).ok, false);
     assert.equal((await command(phone.socket, 'input:join', { source: 'phone1', token })).ok, true);
+    assert.equal((await command(output.socket, 'input:watch', { source: 'phone1', kind: 'video' })).ok, false);
     await command(director.socket, 'program:set-video', { videoId: 'aqz-KE-bpKQ' });
     let current = await state(director.socket);
     await command(director.socket, 'program:playback', { videoId: current.videoId, playbackRevision: current.playback.revision, action: 'seek', position: 88 });
@@ -149,6 +150,9 @@ test('phone invites are source-specific and a disconnected on-air camera returns
     assert.equal(current.source, 'phone1');
     assert.equal((await command(output.socket, 'input:watch', { source: 'phone2', kind: 'video' })).ok, false);
     assert.equal((await command(output.socket, 'input:watch', { source: 'phone1', kind: 'video' })).ok, true);
+    assert.equal((await command(director.socket, 'program:set-source', { source: 'youtube' })).ok, true);
+    assert.equal((await command(output.socket, 'input:signal', { source: 'phone1', kind: 'video', to: phone.socket.id, data: { type: 'candidate', candidate: { candidate: 'test' } } })).ok, false);
+    assert.equal((await command(director.socket, 'program:set-source', { source: 'phone1' })).ok, true);
     const fallback = new Promise<ProgramState>(resolve => {
       const onState = (next: ProgramState) => { if (next.source === 'youtube') { output.socket.off('program:state', onState); resolve(next); } };
       output.socket.on('program:state', onState);
@@ -158,4 +162,29 @@ test('phone invites are source-specific and a disconnected on-air camera returns
     assert.equal(restored.videoId, 'aqz-KE-bpKQ');
     assert.ok(restored.playback.position !== null && restored.playback.position >= 88);
   } finally { clients.forEach(client => client.disconnect()); await stop(running.child); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('production Director access key protects invites and camera controls across restart', { timeout: 20000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'overlay-director-key-'));
+  const data = path.join(dir, 'db.sqlite');
+  let running = await start(data, { NODE_ENV: 'production' });
+  const clients: Socket[] = [];
+  try {
+    const visitor = await connect(running.url), director = await connect(running.url);
+    clients.push(visitor.socket, director.socket);
+    assert.equal((await command(visitor.socket, 'input:director')).ok, false);
+    assert.equal((await command(visitor.socket, 'input:invites')).ok, false);
+    assert.equal((await command(visitor.socket, 'program:set-source', { source: 'youtube' })).ok, false);
+    assert.equal((await command(visitor.socket, 'program:set-audio', { source: 'youtube', muted: true })).ok, false);
+    const key = readFileSync(path.join(dir, 'director-access-key'), 'utf8').trim();
+    assert.ok(key.length >= 32);
+    assert.equal((await command(director.socket, 'input:director', { key })).ok, true);
+    assert.equal((await command(director.socket, 'input:invites')).ok, true);
+    assert.equal((await command(director.socket, 'program:set-audio', { source: 'youtube', muted: true })).ok, true);
+    clients.forEach(client => client.disconnect()); await stop(running.child);
+    running = await start(data, { NODE_ENV: 'production' });
+    assert.equal(readFileSync(path.join(dir, 'director-access-key'), 'utf8').trim(), key);
+    const restored = await connect(running.url); clients.push(restored.socket);
+    assert.equal((await command(restored.socket, 'input:director', { key })).ok, true);
+  } finally { clients.forEach(client => client.disconnect()); if (running.child.exitCode === null) await stop(running.child); rmSync(dir, { recursive: true, force: true }); }
 });

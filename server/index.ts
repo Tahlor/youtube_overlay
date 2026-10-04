@@ -10,7 +10,7 @@ import { normalizeAsset } from '../src/shared/asset.js';
 import { ProgramStore } from './programState.js';
 import { LibraryStore } from './library.js';
 import { createImageSearchRouter } from './imageSearch.js';
-import { attachInputSignaling } from './inputSignaling.js';
+import { attachInputSignaling, directorAccessKey } from './inputSignaling.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -18,9 +18,10 @@ const basePath = normalizeBasePath(process.env.BASE_PATH ?? '');
 const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { path: `${basePath}/socket.io`, maxHttpBufferSize: 32000 });
+const dataPath = process.env.DATA_PATH ?? path.resolve('data/overlay.sqlite');
 let library: LibraryStore | null = null;
 let persistenceError = false;
-try { library = new LibraryStore(process.env.DATA_PATH ?? path.resolve('data/overlay.sqlite')); }
+try { library = new LibraryStore(dataPath); }
 catch { persistenceError = true; console.error('SQLite unavailable; Program controls remain available.'); }
 let program: ProgramStore;
 try { program = new ProgramStore(library?.readProgram()); }
@@ -30,6 +31,7 @@ let outputPlayback: (OutputPlayback & { socketId: string }) | null = null;
 let lastPlaybackSave = 0;
 const inputSignaling = attachInputSignaling(io, program, {
   basePath,
+  directorKey: directorAccessKey(dataPath),
   onSelectedCameraDisconnected: source => {
     if (program.getState().source === source) {
       // ProgramStore retains the last saved YouTube position while a camera is on air.
@@ -127,6 +129,7 @@ io.on('connection', socket => {
   });
   socket.on('program:set-source', (payload: { source?: unknown }, ack?: unknown) => {
     runCommand(ack, () => {
+      if (!inputSignaling.isDirector(socket.id)) throw new Error('Director access is required to switch inputs.');
       if (!isInputSource(payload?.source)) throw new Error('Choose a valid input source.');
       if (payload.source !== 'youtube' && !inputSignaling.isAvailable(payload.source)) throw new Error('This camera input is offline.');
       const state = program.getState();
@@ -138,7 +141,10 @@ io.on('connection', socket => {
     });
   });
   socket.on('program:set-audio', (payload: unknown, ack?: unknown) => {
-    runCommand(ack, () => program.setAudio(payload as Parameters<ProgramStore['setAudio']>[0]));
+    runCommand(ack, () => {
+      if (!inputSignaling.isDirector(socket.id)) throw new Error('Director access is required to change audio.');
+      return program.setAudio(payload as Parameters<ProgramStore['setAudio']>[0]);
+    });
   });
   socket.on('program:take', (payload: { asset?: unknown; presentation?: unknown }, ack?: unknown) => {
     runCommand(ack, () => program.take(normalizeAsset(payload?.asset), payload?.presentation), true);

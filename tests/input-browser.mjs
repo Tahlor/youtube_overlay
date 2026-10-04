@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -9,7 +9,7 @@ const temp = mkdtempSync(path.join(tmpdir(), 'overlay-input-browser-'));
 let server;
 async function start() {
   server = spawn(process.execPath, ['dist-server/server/index.js'], {
-    env: { ...process.env, HOST: '127.0.0.1', PORT: '0', BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') },
+    env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '0', BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return new Promise((resolve, reject) => {
@@ -26,6 +26,7 @@ async function stop() {
 }
 
 const base = await start();
+const accessKey = readFileSync(path.join(temp, 'director-access-key'), 'utf8').trim();
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH ?? '/usr/local/bin/chromium',
   headless: true,
@@ -44,8 +45,9 @@ await phone.addInitScript(() => {
 });
 
 try {
-  await Promise.all([director.goto(`${base}/director`), output.goto(`${base}/output`)]);
+  await Promise.all([director.goto(`${base}/director#access=${encodeURIComponent(accessKey)}`), output.goto(`${base}/output`)]);
   await director.getByText('Connected', { exact: true }).waitFor();
+  assert.equal(new URL(director.url()).hash.includes('access='), false);
   await director.getByLabel('YouTube stream or video').fill('aqz-KE-bpKQ');
   await director.getByRole('button', { name: 'Set video', exact: true }).click();
   await director.locator('.phone-invites summary').click();

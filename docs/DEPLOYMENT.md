@@ -39,7 +39,7 @@ PORT=13050
 BASE_PATH=/youtube_overlay
 ```
 
-Phone media uses direct WebRTC. The build can include `VITE_TURN_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` if a TURN relay is required for restrictive networks. STUN alone may fail through symmetric NAT or restrictive firewalls. Phone capture requires HTTPS; the public URL already supplies it. Invite tokens are created in memory on server startup and must be regenerated after a restart. Do not publish invite links or append their tokens to the public Output URL.
+Phone media uses direct WebRTC. The build can include `VITE_TURN_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` if a TURN relay is required for restrictive networks. STUN alone may fail through symmetric NAT or restrictive firewalls. Phone capture requires HTTPS; the public URL already supplies it. Invite tokens are created in memory on server startup and must be regenerated after a restart. Do not publish invite links or append their tokens to the public Output URL. In production, the server creates `data/director-access-key` (mode 0600) when `DIRECTOR_ACCESS_KEY` is unset. Open Director once with `#access=KEY` or enter the key under **Phone camera links**; the browser stores it locally and removes the fragment from the address bar. Preserve this key file with other runtime data.
 
 ## systemd
 

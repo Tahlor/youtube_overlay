@@ -118,7 +118,7 @@ Run `npm run test:broadcast` after a build to validate desktop geometry, all thr
 
 ## Live inputs
 
-Director has four phone slots and its own webcam slot. Copy an invite from a phone slot and open it on that phone over HTTPS. Each invite belongs to one slot and to the current server session; restarting the server invalidates the link. A phone requests camera and microphone access only when **Start** is pressed. The Director webcam works the same way. The local Director preview is muted.
+Director has four phone slots and its own webcam slot. In production, camera controls and invites require a Director access key. If `DIRECTOR_ACCESS_KEY` is unset, the server generates one in `data/director-access-key` with owner-only permissions; open Director with `#access=KEY` once or enter it under **Phone camera links**. The browser stores it locally and removes the fragment from the address bar. Copy an invite from a phone slot and open it on that phone over HTTPS. Each invite belongs to one slot and to the current server session; restarting the server invalidates the link. A phone requests camera and microphone access only when **Start** is pressed. The Director webcam works the same way. The local Director preview is muted.
 
 Choose a connected input to put it on Output. Camera inputs are live, so YouTube pause, rewind, fast forward and seek apply only when YouTube is selected. Switching away records the last YouTube playback position; switching back resumes from that position. A selected camera disconnect returns Output to the saved YouTube feed. Existing shoulder, picture in picture, image-only layouts and transitions use whichever input is selected.
 
