@@ -1,24 +1,28 @@
 import { useState } from "react";
-import type { Asset, CommandAck } from "../shared/types";
+import type { Asset } from "../shared/types";
 import { parseYouTubeVideoId } from "../shared/youtube";
-import { socket } from "../socket";
+import { sendCommand } from "../commands";
+import { ImageLibrary } from "../components/ImageLibrary";
+import { Attribution } from "../components/Attribution";
+import { AssetImage } from "../components/AssetImage";
 import { useProgram } from "../useProgram";
 import { YouTubePlayer } from "../components/YouTubePlayer";
 import { appPath } from "../basePath";
-
-const TEST_ASSET: Asset = {
-  id: "m0-test-graphic",
-  title: "General Conference Director test graphic",
-  fullUrl: appPath("test-graphic.svg"),
-  thumbnailUrl: appPath("test-graphic.svg"),
-  source: "Built in",
-};
 
 export function Director() {
   const { program, connected } = useProgram();
   const [videoInput, setVideoInput] = useState("");
   const [preview, setPreview] = useState<Asset | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [previewVersion, setPreviewVersion] = useState(0);
+  const [previewReady, setPreviewReady] = useState(false);
+  function select(asset: Asset) { setPreviewReady(false); setPreviewVersion(value => value + 1); setPreview(asset); }
+
+  async function command(event: string, payload?: unknown) {
+    setError(null);
+    try { await sendCommand(event, payload); } catch (error) { setError((error as Error).message); }
+  }
 
   function setVideo() {
     const videoId = parseYouTubeVideoId(videoInput);
@@ -27,26 +31,10 @@ export function Director() {
       return;
     }
 
-    setError(null);
-    socket.emit("program:set-video", { videoId }, (result: CommandAck) => {
-      if (!result.ok) setError(result.error ?? "Could not update the video.");
-    });
+    void command("program:set-video", { videoId });
   }
-
-  function takePreview() {
-    if (!preview) return;
-    setError(null);
-    socket.emit("program:take", { asset: preview }, (result: CommandAck) => {
-      if (!result.ok) setError(result.error ?? "Could not take the graphic.");
-    });
-  }
-
-  function goLive() {
-    setError(null);
-    socket.emit("program:live", (result: CommandAck) => {
-      if (!result.ok) setError(result.error ?? "Could not return to LIVE.");
-    });
-  }
+  function takePreview() { if (preview && previewReady) void command("program:take", { asset: preview }); }
+  function goLive() { void command("program:live"); }
 
   return (
     <main className="director-shell">
@@ -77,9 +65,9 @@ export function Director() {
             }}
             placeholder="Paste youtube.com/watch, youtube.com/live, youtu.be, or a video ID"
           />
-          <button onClick={setVideo}>Set video</button>
+          <button onClick={setVideo} disabled={!connected}>Set video</button>
         </div>
-        {error && <p className="error-message">{error}</p>}
+        {error && <p role="alert" className="error-message">{error}</p>}
       </section>
 
       <section className="director-grid">
@@ -103,7 +91,7 @@ export function Director() {
             <span className={`program-badge ${program.mode}`}>{program.mode.toUpperCase()}</span>
           </div>
           {program.mode === "graphic" && program.activeAsset ? (
-            <img src={program.activeAsset.thumbnailUrl ?? program.activeAsset.fullUrl} alt={program.activeAsset.title} />
+            <AssetImage asset={program.activeAsset} thumbnail />
           ) : (
             <div className="live-card">LIVE VIDEO</div>
           )}
@@ -113,17 +101,7 @@ export function Director() {
 
       <section className="switcher-grid">
         <article className="panel library-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">M0 graphics</p>
-              <h2>Built-in test graphic</h2>
-            </div>
-          </div>
-          <button className="asset-card" onClick={() => setPreview(TEST_ASSET)}>
-            <img src={TEST_ASSET.thumbnailUrl} alt={TEST_ASSET.title} />
-            <span>Load into Preview</span>
-          </button>
-          <p className="muted-note search-coming">Image search arrives in M1.</p>
+          <ImageLibrary preview={preview} select={select} />
         </article>
 
         <article className="panel preview-panel">
@@ -135,8 +113,9 @@ export function Director() {
           </div>
           {preview ? (
             <div className="preview-content">
-              <img src={preview.fullUrl} alt={preview.title} />
+              <AssetImage key={previewVersion} asset={preview} onReady={setPreviewReady} />
               <strong>{preview.title}</strong>
+              <Attribution asset={preview} />
             </div>
           ) : (
             <div className="empty-preview">Select a graphic. Nothing changes on the TV until you press TAKE.</div>
@@ -145,14 +124,14 @@ export function Director() {
       </section>
 
       <footer className="control-dock">
-        <button className="live-button" onClick={goLive} disabled={!connected}>
+        <button className="live-button" onClick={goLive}>
           <span className="live-dot" /> LIVE
         </button>
         <div className="dock-status">
           <span>Preview</span>
           <strong>{preview?.title ?? "Nothing selected"}</strong>
         </div>
-        <button className="take-button" onClick={takePreview} disabled={!preview || !connected}>
+        <button className="take-button" onClick={takePreview} disabled={!preview || !previewReady || !connected}>
           TAKE ▶
         </button>
       </footer>

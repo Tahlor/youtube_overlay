@@ -25,7 +25,7 @@ Both browsers load the YouTube player directly. Archimedes coordinates only Prog
 - Render its own YouTube monitor.
 - Accept/set the video URL or ID.
 - Hold local Preview state.
-- Later: image search, Favorites, Recent.
+- Manual image search, Favorites and Recent.
 - Emit explicit Program commands.
 - Render the current canonical Program state for confidence.
 
@@ -44,7 +44,7 @@ Both browsers load the YouTube player directly. Archimedes coordinates only Prog
 - Broadcast the full Program state after each accepted change.
 - Send the current Program state immediately when a client connects.
 - Respond to explicit state-resync requests from already-connected clients.
-- Later: host image-provider endpoints and persistence.
+- Host image-provider endpoints and SQLite persistence.
 
 ## Core domain types
 
@@ -214,3 +214,17 @@ If any optional subsystem fails, LIVE and already-loaded core switching must con
 - Authentication/authorization.
 
 These can be added only when a demonstrated need outweighs their operational cost.
+
+## M1–M3 implementation
+
+`WikimediaProvider` implements `ImageProvider` with Commons file search and image metadata. `/api/images/search?q=…` returns normalized assets with HTTPS thumbnails, source/creator/license attribution, bounded queries, a 10-second upstream timeout, bounded concurrency and a five-minute cache. Images load directly from Wikimedia; the server does not proxy arbitrary image URLs.
+
+`LibraryStore` uses Node’s bundled SQLite API with WAL and parameterized statements. `/api/library` returns Favorites and Recent, and `/api/library/favorite` accepts an asset plus boolean favorite status. TAKE increments use count and last-used time; favorites do not affect Program. `library:changed` invalidates Director library data after favorite/usage changes. The same database stores a validated full Program snapshot after accepted commands, so a process restart restores video/layout/revision. A corrupt snapshot starts safely in LIVE. Startup or write failures expose degraded persistence in health and the library UI while core switching continues.
+
+Assets are normalized and bounded at the server boundary. URL protocols are restricted to HTTPS or app-relative paths; provider markup is rendered as plain text. Invalid commands never alter Program. Acknowledgements are checked as functions before invocation. Director mutation commands expire after four seconds, resync after a missing acknowledgement, and are never queued while disconnected.
+
+Output keeps a single YouTube iframe/player mounted across LIVE/graphic layouts. The IFrame API reports startup, playback state, errors and blocked autoplay; Start video and Retry player remain available alongside a YouTube link. Controls occupy their own area and never obscure the embedded player. Director monitoring stays muted. Player readiness does not govern Program switching.
+
+Build metadata at `/build.json` and in `/api/healthz` identifies the source commit and frontend asset names. API and route HTML responses avoid stale caching; Vite assets carry content hashes.
+
+References: [Commons image metadata API](https://www.mediawiki.org/wiki/API:Imageinfo), [YouTube IFrame API](https://developers.google.com/youtube/iframe_api_reference), [Node SQLite API](https://nodejs.org/api/sqlite.html).

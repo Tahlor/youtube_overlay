@@ -1,0 +1,63 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
+import { io, type Socket } from 'socket.io-client';
+import type { CommandAck, ProgramState } from '../src/shared/types.js';
+const prefix='/youtube_overlay';
+async function start(data: string) {
+  const child=spawn(process.execPath,['--import','tsx','server/index.ts'],{env:{...process.env,PORT:'0',HOST:'127.0.0.1',BASE_PATH:prefix,DATA_PATH:data},stdio:['ignore','pipe','pipe']});
+  const url=await new Promise<string>((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(new Error('Server startup timeout')),10000);
+    child.stdout!.on('data',chunk=>{ const match=String(chunk).match(/http:\/\/127.0.0.1:(\d+)/); if(match){clearTimeout(timer);resolve(`http://127.0.0.1:${match[1]}`);} });
+    child.once('exit',code=>{clearTimeout(timer);reject(new Error(`Server exited ${code}`));});
+  });
+  return {child,url};
+}
+async function stop(child: ChildProcess) { await new Promise<void>(resolve=>{ child.once('exit',()=>resolve());child.kill('SIGTERM'); }); }
+async function connect(url: string) {
+  const socket=io(url,{path:`${prefix}/socket.io`,transports:['websocket'],forceNew:true,autoConnect:false});
+  const state=await new Promise<ProgramState>((resolve,reject)=>{socket.once('program:state',resolve);socket.once('connect_error',error=>{socket.disconnect();reject(error);});socket.connect();});
+  return {socket,state};
+}
+function command(socket:Socket,event:string,payload?:unknown):Promise<CommandAck>{
+  return new Promise((resolve,reject)=>{const cb=(err:Error|null,result:CommandAck)=>err?reject(err):resolve(result);if(payload===undefined)socket.timeout(3000).emit(event,cb);else socket.timeout(3000).emit(event,payload,cb);});
+}
+function state(socket:Socket):Promise<ProgramState>{return new Promise(resolve=>{socket.once('program:state',resolve);socket.emit('program:get-state');});}
+test('real prefixed server: shared state, malformed commands, rapid switching, persistence, restart and reconnect', {timeout:30000},async()=>{
+  const dir=mkdtempSync(path.join(tmpdir(),'overlay-server-')); let running:Awaited<ReturnType<typeof start>>|undefined; const clients:Socket[]=[];
+  try {
+    running=await start(path.join(dir,'db.sqlite'));
+    const director=await connect(running.url),output=await connect(running.url);clients.push(director.socket,output.socket);
+    const asset={id:'test',title:'Persistent graphic',fullUrl:`${prefix}/test-graphic.svg`,source:'Built in'};
+    assert.equal((await command(director.socket,'program:set-video',{videoId:'aqz-KE-bpKQ'})).ok,true);
+    assert.equal((await state(output.socket)).videoId,'aqz-KE-bpKQ');
+    const before=await state(output.socket);
+    for(const payload of [null,{}, {videoId:'bad'}, {videoId:12}]) assert.equal((await command(director.socket,'program:set-video',payload)).ok,false);
+    assert.equal((await command(director.socket,'program:take',{asset:{...asset,fullUrl:'javascript:alert(1)'}})).ok,false);
+    assert.deepEqual(await state(output.socket),before);
+    // A non-function acknowledgement is a malformed client payload, not a process failure.
+    director.socket.emit('program:live','not-a-function'); await state(output.socket);
+    for(let i=0;i<10;i++){ assert.equal((await command(director.socket,'program:take',{asset})).ok,true);assert.equal((await command(director.socket,'program:live')).ok,true); }
+    await command(director.socket,'program:take',{asset}); const saved=await state(output.socket);
+    const res=await fetch(`${running.url}${prefix}/api/library/favorite`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset,favorite:true})}); assert.equal(res.status,200);
+    assert.equal((await fetch(`${running.url}${prefix}/api/images/search?q=x`)).status,400);
+    assert.equal((await fetch(`${running.url}${prefix}/api/library/favorite`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{'})).status,400);
+    output.socket.disconnect(); output.socket.connect(); await new Promise<void>(resolve=>output.socket.once('connect',()=>resolve())); assert.deepEqual(await state(output.socket),saved);
+    clients.forEach(client=>client.disconnect());await stop(running.child); running=await start(path.join(dir,'db.sqlite'));
+    const restored=await connect(running.url);clients.push(restored.socket);assert.deepEqual(restored.state,saved);
+    const library=await (await fetch(`${running.url}${prefix}/api/library`)).json();assert.equal(library.favorites[0].asset.id,'test');assert.equal(library.recent[0].useCount,11);
+    assert.equal((await command(restored.socket,'program:live')).ok,true);
+  } finally {clients.forEach(client=>client.disconnect());if(running?.child.exitCode===null) await stop(running.child);rmSync(dir,{recursive:true,force:true});}
+});
+test('SQLite startup failure cannot disable LIVE or TAKE', {timeout:15000},async()=>{
+  const dir=mkdtempSync(path.join(tmpdir(),'overlay-failure-'));const running=await start(dir);let socket:Socket|undefined;
+  try { const connected=await connect(running.url);socket=connected.socket;
+    assert.equal((await fetch(`${running.url}${prefix}/api/library`)).status,503);
+    assert.equal((await command(socket,'program:take',{asset:{id:'fallback',title:'Fallback',fullUrl:`${prefix}/test-graphic.svg`}})).ok,true);
+    assert.equal((await command(socket,'program:live')).ok,true);
+    const health=await (await fetch(`${running.url}${prefix}/api/healthz`)).json();assert.equal(health.ok,true);assert.equal(health.persistence,'unavailable');
+  } finally {socket?.disconnect();await stop(running.child);rmSync(dir,{recursive:true,force:true});}
+});

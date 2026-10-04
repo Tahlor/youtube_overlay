@@ -1,6 +1,6 @@
 # Archimedes Deployment
 
-The M0 application is deployed on Archimedes as a single Node process behind the existing nginx frontend.
+The M0–M3 application is deployed on Archimedes as a single Node process behind the existing nginx frontend.
 
 ## Production endpoints
 
@@ -25,7 +25,7 @@ The service runs the compiled server from `dist-server/server/index.js`; that pr
 From the project directory:
 
 ```bash
-npm install
+npm ci
 VITE_BASE_PATH=/youtube_overlay/ npm run build
 ```
 
@@ -90,3 +90,21 @@ For a code-only update after promotion:
 6. Verify the public Director, Output, test graphic, health endpoint, and Socket.IO path.
 
 The core application should always be left in LIVE mode after deployment verification.
+
+## M0–M3 code-only deployment
+
+Work in an isolated owning-repository checkout; the established production directory does not need a `.git` directory. Use Node 22.13+; Archimedes production uses `/usr/bin/node` 24.16.0.
+
+1. Run `npm ci` and `npm run check`.
+2. Run `npm run test:browser` against the candidate. Inspect recorded screenshots and distinguish actual YouTube playback observations from simulated autoplay-event tests.
+3. Commit the tested source, push `master`, then build again so `dist/build.json` records that exact commit. If source changes, repeat affected checks.
+4. Run `scripts/deploy.sh /absolute/run-directory`. It installs production dependencies into a separate release, tests that runtime on port 13051, then stops only `app-youtube-overlay.service`, moves original code into a timestamped rollback directory and promotes the release. It restores originals automatically on a failed promotion check.
+5. Check public health, Director/Output, all HTML asset URLs, built-in graphic and WSS. Run browser acceptance against the public prefix; set `RESTART_SERVICE=app-youtube-overlay.service` to verify a real service restart. Finish in LIVE.
+
+The deployment touches only an explicit list of code/build/dependency/doc paths. It preserves production `data/`, `.env`, uploads, unknown paths, systemd and nginx. The backup location is recorded in `rollback-path.txt`; run its `restore.sh` to restore original code while keeping current runtime data. Keep backup directories until the release is accepted. Do not use a directory replacement or `rsync --delete` against the production root.
+
+SQLite defaults to `/home/ubuntu/Projects/youtube_overlay/data/overlay.sqlite`. `DATA_PATH` can select another file. For a consistent live database backup use SQLite’s backup API or stop this app before copying the DB/WAL/SHM together. A service restart reconnects clients and restores the saved full Program. Missing/unavailable persistence starts safely and leaves core switching available; health reports `persistence: unavailable`.
+
+`/youtube_overlay/build.json` and `/api/healthz` include exact commit and built asset names. The service remains enabled at boot; verify `systemctl is-enabled app-youtube-overlay.service`. A host reboot is not required to validate this release and would disturb unrelated services.
+
+A browser on Archimedes may encounter YouTube’s “Sign in to confirm you’re not a bot” challenge. Recovery controls and Program layout can be verified there; actual playback/audio acceptance must be checked on the household TV/browser when YouTube allows playback.

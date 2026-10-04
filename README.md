@@ -6,7 +6,7 @@ The product deliberately starts simple: both Director and Output play the origin
 
 ## Live deployment
 
-The M0 application is deployed on Archimedes:
+The M0–M3 application is deployed on Archimedes:
 
 - Director: `https://taylorarchibald.com/youtube_overlay/director`
 - TV output: `https://taylorarchibald.com/youtube_overlay/output`
@@ -19,7 +19,7 @@ See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for service, nginx, verification,
 1. Open `/director` on the directing computer.
 2. Open `/output` on the TV.
 3. Set the YouTube live URL/video.
-4. Search/select an image (M1; M0 uses a built-in test graphic).
+4. Search Wikimedia Commons or reuse Favorites/Recent; select an image into Preview.
 5. Selecting changes **Preview** only.
 6. Press **TAKE** to change Program.
 7. Press **LIVE** at any time to return Program to the live-video layout.
@@ -57,16 +57,16 @@ See:
 - React + TypeScript + Vite
 - Node.js + Express
 - Socket.IO
-- SQLite planned for M2
+- SQLite via Node’s bundled `node:sqlite` (no database daemon)
 
 The production Node process serves both the built web app and Socket.IO/API.
 
 ## Local development
 
-Requirements: Node.js 22+.
+Requirements: Node.js 22.13+ (production tested on Node 24).
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -85,6 +85,20 @@ npm run check
 
 That command runs client/server TypeScript validation, unit tests, and a production build.
 
-## Development status
+## Browser validation
 
-M0 is deployed and infrastructure/state-flow verified. Issue #1 tracks final M0 acceptance; issue #2 is the next product milestone for image search.
+After `npm run check`, run `npm run test:browser`. It starts an isolated production candidate under `/youtube_overlay`, uses Chromium, and checks real image search, safe Preview, TAKE/LIVE, reconnect, reload and SQLite recovery across a server restart. Set `CHROMIUM_PATH` if Chromium is not at `/usr/local/bin/chromium`.
+
+To test an already deployed target:
+
+```bash
+BASE_URL=https://taylorarchibald.com/youtube_overlay EVIDENCE_DIR=/tmp/overlay-evidence npm run test:browser
+```
+
+This test changes shared Program and finishes in LIVE. Server-restart validation on an external target requires `RESTART_SERVICE=app-youtube-overlay.service` and local sudo access. Autoplay event handling is also exercised with a clearly labeled simulated API event; real YouTube observations are recorded separately. Actual playback and audible sound depend on YouTube and the viewing browser.
+
+## MVP status
+
+M0–M3 are implemented. Tracking issues #1–#4, #10 and #11 contain acceptance evidence and any remaining environmental limits. No captions, AI, automatic TAKE or media pipeline is required.
+
+Search uses Wikimedia Commons; credits and license links are shown in Preview and Output. Review an image’s source page for complete reuse terms. Favorites, usage and current Program are stored in `data/overlay.sqlite` (override with `DATA_PATH`); preserve the database and its WAL/SHM files when backing up a running service. Database/provider outages leave LIVE and loaded Program controls available.

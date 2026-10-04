@@ -12,6 +12,8 @@ export function parseYouTubeVideoId(input: string): string | null {
     return null;
   }
 
+  if (!["https:", "http:"].includes(url.protocol)) return null;
+
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
   let candidate: string | null = null;
 

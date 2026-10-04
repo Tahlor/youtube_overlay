@@ -1,4 +1,5 @@
 import type { Asset, ProgramState } from "../src/shared/types.js";
+import { normalizeAsset } from "../src/shared/asset.js";
 import { isYouTubeVideoId } from "../src/shared/youtube.js";
 
 export class ProgramStore {
@@ -8,6 +9,15 @@ export class ProgramStore {
     activeAsset: null,
     revision: 0,
   };
+
+  constructor(saved?: ProgramState | null) {
+    if (saved) {
+      if (saved.videoId !== null && !isYouTubeVideoId(saved.videoId)) throw new Error("Invalid saved video.");
+      if (!Number.isSafeInteger(saved.revision) || saved.revision < 0) throw new Error("Invalid saved revision.");
+      if (saved.mode !== "live" && saved.mode !== "graphic") throw new Error("Invalid saved mode.");
+      this.state = { ...saved, activeAsset: saved.mode === "graphic" ? normalizeAsset(saved.activeAsset) : null };
+    }
+  }
 
   getState(): ProgramState {
     return structuredClone(this.state);
@@ -27,11 +37,11 @@ export class ProgramStore {
   }
 
   take(asset: Asset): ProgramState {
-    validateAsset(asset);
+    const valid = normalizeAsset(asset);
     this.state = {
       ...this.state,
       mode: "graphic",
-      activeAsset: structuredClone(asset),
+      activeAsset: valid,
       revision: this.state.revision + 1,
     };
     return this.getState();
@@ -46,17 +56,4 @@ export class ProgramStore {
     };
     return this.getState();
   }
-}
-
-function validateAsset(asset: Asset): void {
-  if (!asset || typeof asset !== "object") {
-    throw new Error("Invalid asset.");
-  }
-  if (!nonEmpty(asset.id) || !nonEmpty(asset.title) || !nonEmpty(asset.fullUrl)) {
-    throw new Error("Asset id, title, and fullUrl are required.");
-  }
-}
-
-function nonEmpty(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
 }
