@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
-import type { Asset, PresentationSettings } from "../shared/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Asset, CameraSource, InputSource, PresentationSettings } from "../shared/types";
 import { DEFAULT_PRESENTATION } from "../shared/presentation";
+import { CAMERA_SOURCES, INPUT_SOURCES, effectiveAudioSource } from "../shared/input";
 import { parseYouTubeVideoId } from "../shared/youtube";
 import { sendCommand } from "../commands";
+import { socket } from "../socket";
 import { ImageLibrary } from "../components/ImageLibrary";
 import { Attribution } from "../components/Attribution";
 import { AssetImage } from "../components/AssetImage";
 import { useProgram } from "../useProgram";
+import { useInputReceiver } from "../media/useInputReceiver";
+import { useBroadcaster } from "../media/useBroadcaster";
 import { YouTubePlayer } from "../components/YouTubePlayer";
 import { appPath } from "../basePath";
 import "./director.css";
@@ -19,7 +23,70 @@ export function Director() {
   const [previewVersion, setPreviewVersion] = useState(0);
   const [previewReady, setPreviewReady] = useState(false);
   const [presentation, setPresentation] = useState<PresentationSettings>(() => ({ ...DEFAULT_PRESENTATION }));
+  const [availability, setAvailability] = useState<Record<CameraSource, boolean>>({
+    phone1: false, phone2: false, phone3: false, phone4: false, director: false,
+  });
+  const [inviteLinks, setInviteLinks] = useState<Partial<Record<CameraSource, string>>>({});
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [audioLevels, setAudioLevels] = useState(() => ({ ...program.audio.levels }));
+  const [audioAdjusting, setAudioAdjusting] = useState<InputSource | null>(null);
+  const audioLevelRef = useRef(audioLevels);
+  const cameraPreview = useRef<HTMLVideoElement>(null);
+  const localPreview = useRef<HTMLVideoElement>(null);
+  const lastProgramSource = useRef(program.source);
+  const broadcaster = useBroadcaster();
+  const isYouTubeSelected = program.source === "youtube";
+  const receiver = useInputReceiver(isYouTubeSelected ? null : program.source, !isYouTubeSelected, "video");
+  const directorStream = broadcaster.localStream ?? broadcaster.stream ?? null;
+  const previewStream = program.source === "director" ? (directorStream ?? receiver.stream) : receiver.stream;
+  const audio = program.audio;
+  const effectiveAudio = effectiveAudioSource(program.source, audio);
   const currentPresentation = program.presentation ?? DEFAULT_PRESENTATION;
+
+  useEffect(() => {
+    audioLevelRef.current = { ...program.audio.levels };
+    if (audioAdjusting === null) setAudioLevels({ ...program.audio.levels });
+  }, [program.audio.levels, audioAdjusting]);
+
+  useEffect(() => {
+    const claimDirector = () => socket.emit("input:director", (result?: { ok?: boolean; error?: string }) => {
+      if (!result?.ok) setInputError(result?.error ?? "Director connection could not be claimed. Reconnect and try again.");
+      else setInputError(null);
+    });
+    const onAvailability = (next: Partial<Record<CameraSource, boolean>>) => {
+      setAvailability(current => ({ ...current, ...next }));
+    };
+    socket.on("connect", claimDirector);
+    socket.on("input:availability", onAvailability);
+    if (socket.connected) claimDirector();
+    return () => {
+      socket.off("connect", claimDirector);
+      socket.off("input:availability", onAvailability);
+    };
+  }, []);
+
+  useEffect(() => {
+    const previous = lastProgramSource.current;
+    if (previous !== "youtube" && program.source === "youtube" && !availability[previous]) {
+      setFallbackNotice(`${sourceLabel(previous)} disconnected. Output returned to the saved YouTube video.`);
+    }
+    lastProgramSource.current = program.source;
+  }, [program.source, availability]);
+
+  useEffect(() => {
+    if (cameraPreview.current) {
+      cameraPreview.current.srcObject = previewStream;
+      if (previewStream) void cameraPreview.current.play().catch(() => undefined);
+    }
+    if (localPreview.current) {
+      localPreview.current.srcObject = directorStream;
+      if (directorStream) void localPreview.current.play().catch(() => undefined);
+    }
+  }, [previewStream, directorStream]);
 
   useEffect(() => {
     setPresentation({ ...currentPresentation });
@@ -50,6 +117,62 @@ export function Director() {
     void command("program:set-video", { videoId });
   }
 
+  function selectSource(source: InputSource) {
+    setInputError(null);
+    setFallbackNotice(null);
+    void command("program:set-source", { source });
+  }
+
+  async function startDirectorInput() {
+    setInputError(null);
+    try {
+      await broadcaster.start({ source: "director" });
+    } catch (failure) {
+      setInputError((failure as Error).message || "Could not start the director camera.");
+    }
+  }
+
+  function requestPhoneInvites() {
+    if (!connected || inviteBusy) return;
+    setInviteBusy(true);
+    setInviteError(null);
+    setCopyMessage(null);
+    socket.timeout(5000).emit("input:invites", (timeout: Error | null, response?: {
+      ok?: boolean;
+      links?: Partial<Record<CameraSource, string>>;
+      error?: string;
+    }) => {
+      setInviteBusy(false);
+      if (timeout || !response?.ok || !response.links) {
+        setInviteError(response?.error ?? "Could not create phone links. Reconnect and try again.");
+        return;
+      }
+      setInviteLinks(response.links);
+    });
+  }
+
+  async function copyInvite(source: CameraSource) {
+    const link = inviteLinks[source];
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(new URL(link, window.location.origin).toString());
+      setCopyMessage(`${sourceLabel(source)} link copied`);
+    } catch {
+      setCopyMessage("Clipboard access is unavailable. Select and copy the link.");
+    }
+  }
+
+  function updateAudioLevel(source: InputSource, update: { volume?: number; muted?: boolean }) {
+    const next = { ...audioLevelRef.current, [source]: { ...audioLevelRef.current[source], ...update } };
+    audioLevelRef.current = next;
+    setAudioLevels(next);
+  }
+
+  function saveAudioVolume(source: InputSource) {
+    void command("program:set-audio", { source, volume: audioLevelRef.current[source].volume })
+      .finally(() => setAudioAdjusting(null));
+  }
+
   function takePreview() {
     if (preview && previewReady && connected) {
       void command("program:take", { asset: preview, presentation });
@@ -62,10 +185,12 @@ export function Director() {
 
   const onAirTitle = program.mode === "graphic" && program.activeAsset
     ? program.activeAsset.title
-    : program.videoId ? "Main video" : "No video set";
+    : isYouTubeSelected ? (program.videoId ? "Main video" : "No video set") : `${sourceLabel(program.source)} camera`;
   const onAirLayout = program.mode === "graphic"
     ? ({ shoulder: "Over the shoulder", pip: "Picture in picture", image: "Image only · video audio continues" } as const)[currentPresentation.layout]
-    : "Main video · playback controls are shared";
+    : isYouTubeSelected ? "Main video · playback controls are shared" : "Live camera · pause and seek are unavailable";
+
+  const outputSourceName = useMemo(() => sourceLabel(program.source), [program.source]);
 
   return (
     <main className="director-shell compact-director">
@@ -127,22 +252,170 @@ export function Director() {
         <article className="panel monitor-panel console-monitor">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Shared program source</p>
+              <p className="eyebrow">Output source · {outputSourceName}</p>
               <h2>Video & playback</h2>
             </div>
-            <span className="muted-note">Monitor muted</span>
+            <span className="muted-note">Preview muted</span>
           </div>
-          <YouTubePlayer
-            videoId={program.videoId}
-            title="Director live monitor"
-            muted
-            compact
-            playback={program.playback}
-            connected={connected}
-            clockOffset={clockOffset}
-            outputPlayback={outputPlayback}
-          />
-          <p className="playback-independence">Pause, rewind, fast forward, and seek control the shared video. Changing image layout keeps video and audio running.</p>
+
+          {fallbackNotice && <p className="camera-fallback-notice" role="status">{fallbackNotice}</p>}
+
+          <div className="source-selector" role="group" aria-label="Choose the video source for Output">
+            {INPUT_SOURCES.map(source => {
+              const live = source === "youtube" || availability[source as CameraSource];
+              const selected = program.source === source;
+              return (
+                <button
+                  key={source}
+                  type="button"
+                  title={sourceLabel(source)}
+                  aria-label={sourceLabel(source)}
+                  className={`source-choice ${selected ? "selected" : ""}`}
+                  aria-pressed={selected}
+                  onClick={() => selectSource(source)}
+                  disabled={!connected}
+                >
+                  <span className={`source-dot ${live ? "source-online" : "source-offline"}`} aria-hidden="true" />
+                  <span>{source === 'director' ? 'Webcam' : sourceLabel(source)}</span>
+                  <small>{source === "youtube" ? "Saved" : live ? "Live" : "Offline"}</small>
+                </button>
+              );
+            })}
+          </div>
+
+          {isYouTubeSelected ? (
+            <>
+              <YouTubePlayer
+                videoId={program.videoId}
+                title="Director live monitor"
+                muted
+                compact
+                playback={program.playback}
+                connected={connected}
+                clockOffset={clockOffset}
+                outputPlayback={outputPlayback}
+              />
+              <p className="playback-independence">Pause, rewind, fast forward, and seek control the shared video. Image layouts keep its video and audio running.</p>
+            </>
+          ) : (
+            <div className="camera-monitor">
+              {previewStream ? (
+                <video ref={cameraPreview} className="input-preview" muted playsInline autoPlay aria-label={`${sourceLabel(program.source)} camera preview`} />
+              ) : (
+                <div className="input-preview-empty">
+                  <span className="camera-preview-icon" aria-hidden="true">◉</span>
+                  <strong>{availability[program.source as CameraSource] ? "Connecting to live camera…" : `${sourceLabel(program.source)} is offline`}</strong>
+                  <span>{receiver.error ?? "The saved YouTube video stays available from the source selector."}</span>
+                </div>
+              )}
+              <p className="playback-independence">Live camera feed. Pause, rewind, and seek are unavailable. Your YouTube video and its playback position are saved.</p>
+              {receiver.error && <p className="input-error" role="alert">{receiver.error}</p>}
+            </div>
+          )}
+
+          <div className="director-input-strip">
+            {directorStream && program.source !== "director" && (
+              <video ref={localPreview} className="director-local-preview" muted playsInline autoPlay aria-label="Muted director local preview" />
+            )}
+            <div className="director-input-status">
+              <strong>Director webcam</strong>
+              <span className={`camera-state ${broadcaster.status === "ready" ? "camera-ready" : ""} ${broadcaster.error || inputError ? "camera-error" : ""}`} role={broadcaster.error || inputError ? "alert" : "status"}>
+                {broadcaster.error ?? inputError ?? (directorStream ? `Local preview muted · ${broadcaster.status}` : broadcaster.status)}
+              </span>
+            </div>
+            {directorStream ? (
+              <button type="button" className="camera-stop" onClick={broadcaster.stop}>Stop webcam</button>
+            ) : (
+              <button type="button" onClick={() => void startDirectorInput()} disabled={!connected || broadcaster.status === "requesting" || broadcaster.status === "connecting"}>
+                {broadcaster.status === "requesting" ? "Waiting for permission…" : "Start webcam"}
+              </button>
+            )}
+          </div>
+
+          <div className="audio-routing">
+            <label className="follow-audio">
+              <input
+                type="checkbox"
+                checked={audio.followSelected}
+                disabled={!connected}
+                onChange={event => void command("program:set-audio", event.target.checked
+                  ? { followSelected: true }
+                  : { followSelected: false, audioSource: program.source })}
+              />
+              <span>Follow selected source audio</span>
+            </label>
+            <label className="audio-route-label">
+              <span>Audio from</span>
+              <select
+                aria-label="Audio source"
+                value={audio.source}
+                disabled={!connected || audio.followSelected}
+                onChange={event => void command("program:set-audio", { audioSource: event.target.value as InputSource })}
+              >
+                {INPUT_SOURCES.map(source => (
+                  <option key={source} value={source} disabled={source === "youtube" && !isYouTubeSelected}>{sourceLabel(source)}</option>
+                ))}
+              </select>
+            </label>
+            <span className="audio-active">Active: {sourceLabel(effectiveAudio)} audio</span>
+          </div>
+
+          <details className="audio-mixer">
+            <summary>Per-input volume and mute</summary>
+            <div className="audio-mixer-list">
+              {INPUT_SOURCES.map(source => {
+                const level = audioLevels[source];
+                return (
+                  <div className="audio-mixer-row" key={source}>
+                    <strong>{sourceLabel(source)}</strong>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={level.volume}
+                      aria-label={`${sourceLabel(source)} volume`}
+                      onPointerDown={() => setAudioAdjusting(source)}
+                      onChange={event => updateAudioLevel(source, { volume: Number(event.target.value) })}
+                      onPointerUp={() => saveAudioVolume(source)}
+                      onKeyDown={() => setAudioAdjusting(source)}
+                      onKeyUp={() => saveAudioVolume(source)}
+                      onBlur={() => { if (audioAdjusting === source) saveAudioVolume(source); }}
+                      disabled={!connected}
+                    />
+                    <output>{level.volume}%</output>
+                    <button
+                      type="button"
+                      className={level.muted ? "audio-muted" : ""}
+                      aria-pressed={level.muted}
+                      disabled={!connected}
+                      onClick={() => void command("program:set-audio", { source, muted: !level.muted })}
+                    >{level.muted ? "Muted" : "Mute"}</button>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+
+          <details className="phone-invites">
+            <summary>Phone camera links</summary>
+            <div className="phone-invite-content">
+              <p>Each link is private to this session and opens one assigned phone input.</p>
+              <button type="button" onClick={requestPhoneInvites} disabled={!connected || inviteBusy}>
+                {inviteBusy ? "Creating links…" : Object.keys(inviteLinks).length ? "Refresh phone links" : "Create phone links"}
+              </button>
+              {inviteError && <p className="input-error" role="alert">{inviteError}</p>}
+              {CAMERA_SOURCES.filter(source => source !== "director").map(source => (
+                inviteLinks[source] ? (
+                  <div className="phone-invite-row" key={source}>
+                    <label htmlFor={`invite-${source}`}>{sourceLabel(source)}</label>
+                    <input id={`invite-${source}`} readOnly value={new URL(inviteLinks[source]!, window.location.origin).toString()} onFocus={event => event.currentTarget.select()} />
+                    <button type="button" onClick={() => void copyInvite(source)}>Copy</button>
+                  </div>
+                ) : null
+              ))}
+              {copyMessage && <span className="copy-message" role="status">{copyMessage}</span>}
+            </div>
+          </details>
         </article>
 
         <article className="panel preview-panel console-preview">
@@ -236,4 +509,10 @@ export function Director() {
       </section>
     </main>
   );
+}
+
+function sourceLabel(source: InputSource): string {
+  if (source === "youtube") return "YouTube";
+  if (source === "director") return "Director webcam";
+  return `Phone ${source.slice(-1)}`;
 }

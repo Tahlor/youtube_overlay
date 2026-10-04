@@ -138,9 +138,9 @@
 .compact-director .console-library .error-message { flex: none; margin: 3px 0; font-size: .69rem; }
 .compact-director .console-library .error-message button { padding: 4px 7px; font-size: .66rem; }
 
-.compact-director .console-monitor { display: flex; flex-direction: column; }
+.compact-director .console-monitor { display: flex; flex-direction: column; overflow-y: auto; }
 .compact-director .console-monitor .panel-heading { flex: none; }
-.compact-director .console-monitor .youtube-player { flex: 0 1 auto; min-height: 0; }
+.compact-director .console-monitor .youtube-player { flex: none; min-height: auto; }
 .compact-director .console-monitor .youtube-frame { flex: none; aspect-ratio: 16 / 9; border-radius: 8px; }
 .compact-director .console-monitor .transport-controls { flex: none; padding: 6px; border-radius: 0 0 7px 7px; }
 .compact-director .console-monitor .transport-buttons { gap: 5px; flex-wrap: nowrap; }
@@ -158,6 +158,105 @@
 .compact-director .console-monitor .player-controls button { padding: 5px 7px; border-radius: 6px; font-size: .65rem; }
 .compact-director .console-monitor .player-controls a { font-size: .65rem; }
 .compact-director .playback-independence { flex: none; margin: 7px 1px 0; color: #8da1bb; font-size: .66rem; line-height: 1.3; }
+
+.compact-director .source-selector {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 0 7px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.compact-director .source-choice {
+  flex: 1 0 64px;
+  min-width: 64px;
+  display: grid;
+  grid-template-columns: 5px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 3px;
+  row-gap: 1px;
+  padding: 5px 3px;
+  border: 1px solid #33445d;
+  border-radius: 7px;
+  background: #0b1626;
+  color: #cad6e6;
+  text-align: left;
+  font-size: .65rem;
+  line-height: 1.05;
+}
+.compact-director .source-choice.selected { border-color: #60a5fa; background: #142943; color: #f2f7ff; box-shadow: inset 0 0 0 1px #60a5fa55; }
+.compact-director .source-choice > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .58rem; }
+.compact-director .source-choice small { grid-column: 2; color: #91a4bc; font-size: .55rem; }
+.compact-director .source-dot { width: 5px; height: 5px; grid-row: 1 / span 2; border-radius: 50%; }
+.compact-director .source-online { background: #4ade80; box-shadow: 0 0 6px #4ade8066; }
+.compact-director .source-offline { background: #64748b; }
+.compact-director .camera-monitor { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+.compact-director .input-preview,
+.compact-director .input-preview-empty {
+  display: block;
+  width: 100%;
+  min-height: 100px;
+  max-height: 100%;
+  flex: 1 1 auto;
+  aspect-ratio: 16 / 9;
+  border: 1px solid #2e4059;
+  border-radius: 8px;
+  background: #020617;
+  object-fit: contain;
+}
+.compact-director .input-preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 14px; color: #9cafc7; text-align: center; }
+.compact-director .input-preview-empty strong { color: #dbe7f6; font-size: .76rem; }
+.compact-director .input-preview-empty > span:last-child { max-width: 340px; font-size: .64rem; line-height: 1.35; }
+.compact-director .camera-preview-icon { color: #52657e; font-size: 1.35rem; }
+.compact-director .camera-monitor .playback-independence { margin-top: 5px; }
+.compact-director .director-input-strip { display: flex; align-items: center; gap: 7px; flex: none; min-width: 0; margin-top: 5px; padding: 5px 6px; border: 1px solid #293b54; border-radius: 7px; background: #091321; }
+.compact-director .director-input-status { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; gap: 2px; }
+.compact-director .director-input-status > strong { color: #d5e1ef; font-size: .63rem; }
+.compact-director .director-local-preview { flex: none; width: 64px; height: 38px; border: 1px solid #34445c; border-radius: 5px; background: #020617; object-fit: cover; }
+.compact-director .camera-state { min-width: 0; overflow: hidden; color: #9cafc7; font-size: .63rem; text-overflow: ellipsis; white-space: nowrap; }
+.compact-director .camera-state.camera-ready { color: #86efac; }
+.compact-director .camera-state.camera-error { color: #fca5a5; }
+.compact-director .director-input-strip button,
+.compact-director .phone-invite-content > button {
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid #385271;
+  border-radius: 6px;
+  background: #173253;
+  color: #e6f1ff;
+  font-size: .65rem;
+  font-weight: 700;
+}
+.compact-director .director-input-strip .camera-stop { border-color: #71343c; background: #452128; }
+.compact-director .input-error { flex: none; margin: 4px 1px 0; color: #fca5a5; font-size: .64rem; line-height: 1.3; }
+.compact-director .camera-fallback-notice { flex: none; margin: 0 0 5px; padding: 5px 7px; border: 1px solid #806c3a; border-radius: 6px; background: #322813; color: #fde68a; font-size: .64rem; line-height: 1.25; }
+.compact-director .audio-routing { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; flex: none; margin-top: 7px; padding: 6px 7px; border: 1px solid #293b54; border-radius: 7px; background: #091321; }
+.compact-director .follow-audio { display: flex; align-items: center; gap: 5px; min-width: 0; color: #d6e2f0; font-size: .63rem; white-space: nowrap; }
+.compact-director .follow-audio input { width: 13px; height: 13px; margin: 0; accent-color: #3b82f6; }
+.compact-director .audio-route-label { display: flex; align-items: center; gap: 5px; color: #9cafc7; font-size: .62rem; }
+.compact-director .audio-route-label select { max-width: 130px; height: 25px; padding: 3px 5px; border: 1px solid #41516a; border-radius: 5px; color: #e2e8f0; background: #091321; font-size: .62rem; }
+.compact-director .audio-active { flex: 1 1 100%; overflow: hidden; color: #8094ad; font-size: .58rem; text-overflow: ellipsis; white-space: nowrap; }
+.compact-director .audio-mixer,
+.compact-director .phone-invites { flex: none; min-width: 0; margin-top: 4px; color: #aabbd0; font-size: .62rem; }
+.compact-director .audio-mixer summary,
+.compact-director .phone-invites summary { width: fit-content; cursor: pointer; color: #b9c9dc; font-weight: 700; }
+.compact-director .audio-mixer-list { max-height: 135px; margin-top: 4px; overflow-y: auto; border: 1px solid #26364c; border-radius: 6px; background: #091321; }
+.compact-director .audio-mixer-row { display: grid; grid-template-columns: 82px minmax(55px, 1fr) 32px 42px; align-items: center; gap: 5px; padding: 4px 5px; border-bottom: 1px solid #1d2b3d; }
+.compact-director .audio-mixer-row:last-child { border-bottom: 0; }
+.compact-director .audio-mixer-row strong { overflow: hidden; color: #d5e1ef; font-size: .6rem; text-overflow: ellipsis; white-space: nowrap; }
+.compact-director .audio-mixer-row input[type="range"] { width: 100%; min-width: 0; height: 16px; accent-color: #60a5fa; }
+.compact-director .audio-mixer-row output { color: #879bb5; text-align: right; font-size: .57rem; }
+.compact-director .audio-mixer-row button { padding: 4px 5px; border: 1px solid #394b63; border-radius: 5px; background: #16253a; color: #cbd5e1; font-size: .56rem; }
+.compact-director .audio-mixer-row button.audio-muted { border-color: #87434b; background: #47232a; color: #fecaca; }
+.compact-director .phone-invite-content { max-height: 180px; margin-top: 4px; padding: 6px; overflow-y: auto; border: 1px solid #26364c; border-radius: 6px; background: #091321; }
+.compact-director .phone-invite-content > p { margin: 0 0 5px; color: #879bb5; font-size: .6rem; line-height: 1.3; }
+.compact-director .phone-invite-row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 5px; margin-top: 5px; }
+.compact-director .phone-invite-row label { overflow: hidden; color: #d5e1ef; font-size: .59rem; text-overflow: ellipsis; }
+.compact-director .phone-invite-row input { min-width: 0; height: 25px; padding: 4px 6px; border: 1px solid #34445c; border-radius: 5px; background: #050b14; color: #a9bed7; font-size: .55rem; }
+.compact-director .phone-invite-row button { padding: 4px 6px; border: 1px solid #385271; border-radius: 5px; background: #173253; color: #e6f1ff; font-size: .58rem; }
+.compact-director .copy-message { display: block; margin-top: 5px; color: #86efac; font-size: .59rem; }
 
 .compact-director .console-preview { display: flex; flex-direction: column; }
 .compact-director .preview-heading { flex: none; }

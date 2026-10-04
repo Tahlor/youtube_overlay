@@ -9,3 +9,5 @@ dist-server/
 
 data/
 .browser-evidence/
+.broadcast-evidence/
+.playback-evidence/

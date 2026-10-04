@@ -5,10 +5,12 @@ import express from 'express';
 import { Server } from 'socket.io';
 import type { CommandAck, ProgramState, PlaybackCommand, PlaybackSample, OutputPlayback } from '../src/shared/types.js';
 import { isVideoTime } from '../src/shared/playback.js';
+import { isInputSource } from '../src/shared/input.js';
 import { normalizeAsset } from '../src/shared/asset.js';
 import { ProgramStore } from './programState.js';
 import { LibraryStore } from './library.js';
 import { createImageSearchRouter } from './imageSearch.js';
+import { attachInputSignaling } from './inputSignaling.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -26,6 +28,15 @@ catch { program = new ProgramStore(); persistenceError = true; console.error('Sa
 let build: Record<string, unknown> = { commit: 'development' };
 let outputPlayback: (OutputPlayback & { socketId: string }) | null = null;
 let lastPlaybackSave = 0;
+const inputSignaling = attachInputSignaling(io, program, {
+  basePath,
+  onSelectedCameraDisconnected: source => {
+    if (program.getState().source === source) {
+      // ProgramStore retains the last saved YouTube position while a camera is on air.
+      runCommand(undefined, () => program.fallbackToYouTube(source));
+    }
+  },
+});
 try { build = JSON.parse(readFileSync(path.resolve('dist/build.json'), 'utf8')); } catch { /* dev */ }
 
 app.disable('x-powered-by');
@@ -59,7 +70,7 @@ app.post(`${basePath}/api/library/favorite`, (req,res) => {
 const webDist = path.resolve('dist');
 app.use(basePath || '/', express.static(webDist, { index: false }));
 if (basePath) app.get(basePath, (_req,res) => res.redirect(`${basePath}/`));
-app.get([`${basePath}/`, `${basePath}/director`, `${basePath}/output`], (_req,res) => {
+app.get([`${basePath}/`, `${basePath}/director`, `${basePath}/output`, `${basePath}/phone`], (_req,res) => {
   res.set('Cache-Control', 'no-store').sendFile(path.join(webDist, 'index.html'));
 });
 app.use((error: { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -77,7 +88,7 @@ io.on('connection', socket => {
   socket.on('playback:report', (sample: PlaybackSample) => {
     const state = program.getState();
     const now = Date.now();
-    if (now - lastReport < 500 || !sample || sample.videoId !== state.videoId || sample.playbackRevision !== state.playback.revision ||
+    if (state.source !== 'youtube' || now - lastReport < 500 || !sample || sample.videoId !== state.videoId || sample.playbackRevision !== state.playback.revision ||
       !isVideoTime(sample.currentTime) || !isVideoTime(sample.duration) || ![-1, 0, 1, 2, 3, 5].includes(sample.playerState) ||
       typeof sample.status !== 'string' || sample.status.length > 300) return;
     lastReport = now;
@@ -114,6 +125,21 @@ io.on('connection', socket => {
       return program.setVideo(payload.videoId);
     });
   });
+  socket.on('program:set-source', (payload: { source?: unknown }, ack?: unknown) => {
+    runCommand(ack, () => {
+      if (!isInputSource(payload?.source)) throw new Error('Choose a valid input source.');
+      if (payload.source !== 'youtube' && !inputSignaling.isAvailable(payload.source)) throw new Error('This camera input is offline.');
+      const state = program.getState();
+      const output = state.source === 'youtube' ? freshOutput() : null;
+      const position = output && output.duration > 0 && [0, 1, 2, 3].includes(output.playerState)
+        ? output.currentTime + (output.playerState === 1 ? (Date.now() - output.receivedAt) / 1000 : 0)
+        : undefined;
+      return program.setSource(payload.source, position);
+    });
+  });
+  socket.on('program:set-audio', (payload: unknown, ack?: unknown) => {
+    runCommand(ack, () => program.setAudio(payload as Parameters<ProgramStore['setAudio']>[0]));
+  });
   socket.on('program:take', (payload: { asset?: unknown; presentation?: unknown }, ack?: unknown) => {
     runCommand(ack, () => program.take(normalizeAsset(payload?.asset), payload?.presentation), true);
   });
@@ -123,9 +149,11 @@ io.on('connection', socket => {
 function runCommand(ack: unknown, command: () => ProgramState, taken = false) {
   let result: CommandAck;
   try {
+    const previous = program.getState();
     const next = command();
     // Broadcast valid core state independently of optional persistence.
     io.emit('program:state', next, Date.now());
+    if (next.source !== previous.source || audioSettingsDiffer(next, previous)) inputSignaling.refreshAccess();
     try {
       if (library) {
         library.saveProgram(next);
@@ -136,6 +164,13 @@ function runCommand(ack: unknown, command: () => ProgramState, taken = false) {
   } catch (error) { result = { ok: false, error: error instanceof Error ? error.message : 'Command failed.' }; }
   // Malformed acknowledgement payloads must never crash the server.
   if (typeof ack === 'function') ack(result);
+}
+function audioSettingsDiffer(next: ProgramState, previous: ProgramState): boolean {
+  if (next.audio.followSelected !== previous.audio.followSelected || next.audio.source !== previous.audio.source) return true;
+  return Object.keys(next.audio.levels).some(source => {
+    const key = source as keyof ProgramState['audio']['levels'];
+    return next.audio.levels[key].muted !== previous.audio.levels[key].muted || next.audio.levels[key].volume !== previous.audio.levels[key].volume;
+  });
 }
 function freshOutput(): OutputPlayback | null {
   const state = program.getState();

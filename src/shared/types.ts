@@ -1,4 +1,13 @@
 export type ProgramMode = "live" | "graphic";
+export type InputSource = 'youtube' | 'phone1' | 'phone2' | 'phone3' | 'phone4' | 'director';
+export type CameraSource = Exclude<InputSource, 'youtube'>;
+
+export interface InputAudioLevel { volume: number; muted: boolean }
+export interface ProgramAudio {
+  followSelected: boolean;
+  source: InputSource;
+  levels: Record<InputSource, InputAudioLevel>;
+}
 
 export interface PresentationSettings {
   layout: 'shoulder' | 'pip' | 'image';
@@ -22,6 +31,8 @@ export interface Asset {
 
 export interface ProgramState {
   videoId: string | null;
+  source: InputSource;
+  audio: ProgramAudio;
   mode: ProgramMode;
   activeAsset: Asset | null;
   revision: number;

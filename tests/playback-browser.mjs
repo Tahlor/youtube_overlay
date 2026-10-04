@@ -32,7 +32,7 @@ await context.addInitScript(() => {
     playVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 1; this.events.onStateChange({ data: 1, target: this }); }
     pauseVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 2; this.events.onStateChange({ data: 2, target: this }); }
     seekTo(time) { this.time = time; this.at = Date.now(); this.seeks.push(time); }
-    mute() {} unMute() {} destroy() { this.frame.remove(); }
+    mute() {} unMute() {} setVolume() {} destroy() { this.frame.remove(); }
   } };
 });
 const director = await context.newPage(), output = await context.newPage();

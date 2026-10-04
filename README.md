@@ -2,7 +2,7 @@
 
 A lightweight browser-based live-program switcher for family viewing. The initial use case is General Conference: kids act as directors from a laptop while the family watches a shared program output on a TV.
 
-The product deliberately starts simple: both Director and Output play the original YouTube stream directly. Archimedes carries only control/state messages and, later, image-search/persistence traffic. No video transcoding or rebroadcasting is required for the MVP.
+Director and Output can use the original YouTube stream or a live camera input. Phone and director camera media travels peer to peer over WebRTC; the server carries Socket.IO signaling and shared Program state. No video transcoding is used.
 
 ## Live deployment
 
@@ -114,4 +114,14 @@ The Director fits the primary workflow at 1366×768 and 1440×900 with image res
 
 Run `npm run test:broadcast` after a build to validate desktop geometry, all three layouts, corner placement, player continuity, Back to video, streaming UI, pagination, stale-query cancellation and direct URL import. Media playback in this test is simulated; the ordinary browser suite records actual YouTube startup separately.
 
-**YouTube source limitations:** The app keeps the existing embed running underneath graphics and never extracts audio or changes the stream source. YouTube’s [required minimum functionality](https://developers.google.com/youtube/terms/required-minimum-functionality) restricts overlays obscuring the player, and its [developer policies](https://developers.google.com/youtube/terms/developer-policies) prohibit background players. Shoulder overlays and image-only audio should not be described as policy-supported YouTube integration. Image-only audio is a best-effort visual mode, subject to browser and YouTube behavior; actual playback/audio on this host may also be blocked by YouTube’s sign-in challenge.
+**YouTube source limitations:** While YouTube is selected, the existing embed stays mounted across graphic changes and supplies its own audio. The app never extracts that audio. YouTube’s [required minimum functionality](https://developers.google.com/youtube/terms/required-minimum-functionality) restricts overlays obscuring the player, and its [developer policies](https://developers.google.com/youtube/terms/developer-policies) prohibit background players. Shoulder overlays and image-only audio should not be described as policy-supported YouTube integration. Image-only audio is a best-effort visual mode, subject to browser and YouTube behavior; actual playback/audio on this host may also be blocked by YouTube’s sign-in challenge.
+
+## Live inputs
+
+Director has four phone slots and its own webcam slot. Copy an invite from a phone slot and open it on that phone over HTTPS. Each invite belongs to one slot and to the current server session; restarting the server invalidates the link. A phone requests camera and microphone access only when **Start** is pressed. The Director webcam works the same way. The local Director preview is muted.
+
+Choose a connected input to put it on Output. Camera inputs are live, so YouTube pause, rewind, fast forward and seek apply only when YouTube is selected. Switching away records the last YouTube playback position; switching back resumes from that position. A selected camera disconnect returns Output to the saved YouTube feed. Existing shoulder, picture in picture, image-only layouts and transitions use whichever input is selected.
+
+Audio follows the selected source by default. Director can set each input's volume and mute, or choose a separate camera microphone. YouTube can provide audio only while its video is selected; the app does not run a hidden YouTube player for audio. Output receives only the selected camera feed and, when needed, the separately selected audio track. Invite tokens stay on the phone join links and never appear in Output URLs.
+
+WebRTC uses public STUN by default. Restrictive networks, symmetric NATs or firewalls may require a TURN relay. Set `VITE_TURN_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` before building to add one. Camera/microphone capture requires a secure browser context (HTTPS or localhost). Browser autoplay rules may require a user gesture on Output before sound starts.

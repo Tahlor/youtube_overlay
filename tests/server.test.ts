@@ -120,3 +120,42 @@ test('presentation socket TAKE validates layouts and restores settings independe
     const restored = await connect(running.url); clients.push(restored.socket); assert.deepEqual(restored.state, live);
   } finally { clients.forEach(client => client.disconnect()); if (running?.child.exitCode === null) await stop(running.child); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('phone invites are source-specific and a disconnected on-air camera returns to saved YouTube', { timeout: 20000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'overlay-input-server-'));
+  const running = await start(path.join(dir, 'db.sqlite'));
+  const clients: Socket[] = [];
+  try {
+    const director = await connect(running.url), output = await connect(running.url), phone = await connect(running.url);
+    clients.push(director.socket, output.socket, phone.socket);
+    assert.equal((await command(output.socket, 'input:invites')).ok, false);
+    assert.equal((await command(director.socket, 'input:director')).ok, true);
+    const invites = await new Promise<{ ok: boolean; links: Record<string, string> }>(resolve => director.socket.timeout(3000).emit('input:invites', (_error: Error | null, result: { ok: boolean; links: Record<string, string> }) => resolve(result)));
+    assert.equal(invites.ok, true);
+    assert.deepEqual(Object.keys(invites.links).sort(), ['phone1', 'phone2', 'phone3', 'phone4']);
+    const first = new URL(invites.links.phone1, running.url);
+    const second = new URL(invites.links.phone2, running.url);
+    assert.equal(first.pathname, `${prefix}/phone`);
+    assert.notEqual(first.searchParams.get('token'), second.searchParams.get('token'));
+    const token = first.searchParams.get('token');
+    assert.ok(token);
+    assert.equal((await command(phone.socket, 'input:join', { source: 'phone2', token })).ok, false);
+    assert.equal((await command(phone.socket, 'input:join', { source: 'phone1', token })).ok, true);
+    await command(director.socket, 'program:set-video', { videoId: 'aqz-KE-bpKQ' });
+    let current = await state(director.socket);
+    await command(director.socket, 'program:playback', { videoId: current.videoId, playbackRevision: current.playback.revision, action: 'seek', position: 88 });
+    assert.equal((await command(director.socket, 'program:set-source', { source: 'phone1' })).ok, true);
+    current = await state(output.socket);
+    assert.equal(current.source, 'phone1');
+    assert.equal((await command(output.socket, 'input:watch', { source: 'phone2', kind: 'video' })).ok, false);
+    assert.equal((await command(output.socket, 'input:watch', { source: 'phone1', kind: 'video' })).ok, true);
+    const fallback = new Promise<ProgramState>(resolve => {
+      const onState = (next: ProgramState) => { if (next.source === 'youtube') { output.socket.off('program:state', onState); resolve(next); } };
+      output.socket.on('program:state', onState);
+    });
+    phone.socket.disconnect();
+    const restored = await fallback;
+    assert.equal(restored.videoId, 'aqz-KE-bpKQ');
+    assert.ok(restored.playback.position !== null && restored.playback.position >= 88);
+  } finally { clients.forEach(client => client.disconnect()); await stop(running.child); rmSync(dir, { recursive: true, force: true }); }
+});
