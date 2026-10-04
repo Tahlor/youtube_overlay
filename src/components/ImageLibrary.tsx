@@ -8,8 +8,10 @@ import './search.css';
 
 export const TEST_ASSET: Asset = { id: 'm0-test-graphic', title: 'General Conference Director test graphic', fullUrl: appPath('test-graphic.svg'), thumbnailUrl: appPath('test-graphic.svg'), source: 'Built in' };
 
-type SearchProvider = 'all' | 'commons' | 'openverse';
+type SearchProvider = 'all' | 'lds' | 'commons' | 'openverse';
 type ProviderName = Exclude<SearchProvider, 'all'>;
+const SOURCE_LABELS: Record<ProviderName, string> = { lds: 'Church Media', commons: 'Wikimedia', openverse: 'Openverse' };
+const DEFAULT_SOURCES: ProviderName[] = ['commons', 'openverse'];
 type ProviderProgress = { state: 'loading' | 'done' | 'error'; count: number; error?: string };
 type SearchContext = { query: string; provider: SearchProvider };
 type SearchEvent =
@@ -26,6 +28,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function ImageLibrary({ preview, select }: { preview: Asset | null; select: (asset: Asset) => void }) {
   const [query, setQuery] = useState('');
+  const [sources, setSources] = useState<ProviderName[]>(DEFAULT_SOURCES);
   const [provider, setProvider] = useState<SearchProvider>('all');
   const [results, setResults] = useState<Asset[]>([]);
   const [tab, setTab] = useState<'Search' | 'Favorites' | 'Recent'>('Search');
@@ -51,6 +54,12 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
   }, []);
 
   useEffect(() => {
+    request<{ sources: ProviderName[] }>('api/images/sources')
+      .then(data => {
+        const known = data.sources.filter(name => name in SOURCE_LABELS);
+        if (known.length) setSources(known);
+      })
+      .catch(() => { /* keep the default sources */ });
     refresh();
     socket.on('library:changed', refresh);
     socket.on('connect', refresh);
@@ -85,7 +94,7 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
       setHasMore(false);
     }
     const initialProgress: Partial<Record<ProviderName, ProviderProgress>> = {};
-    (targetProvider === 'all' ? ['commons', 'openverse'] : [targetProvider]).forEach(name => {
+    (targetProvider === 'all' ? sources : [targetProvider]).forEach(name => {
       initialProgress[name as ProviderName] = { state: 'loading', count: 0 };
     });
     setProgress(initialProgress);
@@ -231,64 +240,57 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
     ? 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(query.trim())
     : '';
   const sourceSummary = Object.entries(progress).map(([name, state]) => {
-    const label = name === 'commons' ? 'Commons' : 'Openverse';
-    if (state?.state === 'loading') return label + ' searching';
+    const label = SOURCE_LABELS[name as ProviderName] ?? name;
+    if (state?.state === 'loading') return label + ' …';
     if (state?.state === 'error') return label + ' unavailable';
-    return label + ' ' + (state?.count ?? 0) + ' new';
+    return label + ' ' + (state?.count ?? 0);
   }).join(' · ');
+  const sourceOptions: { value: SearchProvider; label: string }[] = [
+    ...(sources.length > 1 ? [{ value: 'all' as const, label: 'All' }] : []),
+    ...sources.map(name => ({ value: name as SearchProvider, label: SOURCE_LABELS[name] })),
+  ];
 
   return <section className="image-library" aria-labelledby="image-library-title">
-    <div className="panel-heading image-library__heading"><h2 id="image-library-title">Image library</h2></div>
+    <div className="image-library__top">
+      <h2 id="image-library-title">Images</h2>
+      <div className="library-tabs" role="tablist" aria-label="Image library">
+        {(['Search', 'Favorites', 'Recent'] as const).map(name => <button key={name} role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{name}</button>)}
+      </div>
+    </div>
+
     <form className="image-library__search" onSubmit={event => { event.preventDefault(); void runSearch(false); }}>
-      <label className="image-library__label" htmlFor="image-query">Search images</label>
+      <label className="visually-hidden" htmlFor="image-query">Search images</label>
       <div className="image-library__search-row">
-        <input id="image-query" value={query} maxLength={120} onChange={event => {
+        <input id="image-query" type="search" value={query} maxLength={120} onChange={event => {
           const next = event.target.value;
           setQuery(next);
           if (busy && next.trim() !== searchContext?.query) discardActiveSearch();
-        }} placeholder="Temples, family, mountains…" />
-        <select aria-label="Image sources" value={provider} onChange={event => {
-          const next = event.target.value as SearchProvider;
-          setProvider(next);
-          if (busy && next !== searchContext?.provider) discardActiveSearch();
-        }}>
-          <option value="all">All sources</option>
-          <option value="openverse">Openverse</option>
-          <option value="commons">Wikimedia Commons</option>
-        </select>
+        }} placeholder="Search images — Christ, temples, pioneers…" />
         <button disabled={query.trim().length < 2}>{busy ? 'Search again' : 'Search'}</button>
       </div>
-    </form>
-
-    <div className="image-library__discovery">
-      {googleImagesUrl && <a href={googleImagesUrl} target="_blank" rel="noreferrer">Open Google Images ↗</a>}
-      {googleImagesUrl && <span aria-hidden="true">·</span>}
-      <span>Results include reuse licenses; check each image’s attribution.</span>
-    </div>
-
-    <form className="image-library__import" onSubmit={event => { event.preventDefault(); importDirectUrl(); }}>
-      <label className="image-library__label" htmlFor="image-url">Use an image URL</label>
-      <div className="image-library__import-row">
-        <input id="image-url" type="url" inputMode="url" value={imageUrl} maxLength={4096} onChange={event => setImageUrl(event.target.value)} placeholder="https://…" />
-        <button className="secondary-button" disabled={!imageUrl.trim()}>Preview URL</button>
+      <div className="image-library__sources" role="radiogroup" aria-label="Image sources">
+        {sourceOptions.map(option => <button type="button" key={option.value} role="radio" aria-checked={provider === option.value}
+          className={'source-chip' + (provider === option.value ? ' source-chip--active' : '')}
+          onClick={() => {
+            setProvider(option.value);
+            if (busy && option.value !== searchContext?.provider) discardActiveSearch();
+          }}>{option.label}</button>)}
       </div>
-      {directError && <p className="error-message" role="alert">{directError}</p>}
     </form>
 
-    <div className="library-tabs" role="tablist" aria-label="Image library">
-      {(['Search', 'Favorites', 'Recent'] as const).map(name => <button key={name} role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{name}</button>)}
-    </div>
     {searchError && <p className="error-message" role="alert">{searchError}</p>}
     {libraryError && <p className="error-message" role="alert">{libraryError} <button onClick={refresh}>Retry saved assets</button></p>}
-    {preview && <button className="favorite-button" disabled={saving} onClick={() => void toggleFavorite()}>{favorite ? 'Unfavorite Preview' : 'Favorite Preview'}</button>}
 
     <div className="image-library__result-status" aria-live="polite">
-      {busy ? <span>{loadingMore ? 'Loading more images…' : 'Searching sources…'} {sourceSummary}</span>
+      {busy ? <span>{loadingMore ? 'Loading more…' : 'Searching…'} {sourceSummary}</span>
         : sourceSummary && contextIsCurrent && tab === 'Search' ? <span>{sourceSummary}</span>
           : searchContext && !contextIsCurrent && results.length > 0 && tab === 'Search'
             ? <span>Showing results for “{searchContext.query}”. Search again to use these settings.</span>
-            : null}
-      {busy && <button type="button" className="image-library__cancel" onClick={cancelSearch}>Cancel</button>}
+            : <span />}
+      <span className="image-library__status-actions">
+        {busy && <button type="button" className="image-library__cancel" onClick={cancelSearch}>Cancel</button>}
+        {preview && <button className="favorite-button" disabled={saving} onClick={() => void toggleFavorite()} aria-label={favorite ? 'Unfavorite Preview' : 'Favorite Preview'}>{favorite ? '★ Unfavorite preview' : '☆ Favorite preview'}</button>}
+      </span>
     </div>
 
     <div className="asset-grid">
@@ -305,7 +307,18 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
     </div>
     {canLoadMore && tab === 'Search' && <button className="secondary-button image-library__more" disabled={busy} onClick={() => void runSearch(true)}>Load more images</button>}
     {!busy && !assets.length && <p className="muted-note">{tab === 'Search' ? searched ? 'No images found. Try another search.' : 'Search and preview an image, then TAKE it to air.' : 'No ' + tab.toLowerCase() + ' yet.'}</p>}
-    <button className="secondary-button image-library__test" onClick={() => select(TEST_ASSET)}>Load built-in test graphic</button>
+    <form className="image-library__import" onSubmit={event => { event.preventDefault(); importDirectUrl(); }}>
+      <label className="visually-hidden" htmlFor="image-url">Use an image URL</label>
+      <div className="image-library__import-row">
+        <input id="image-url" type="url" inputMode="url" value={imageUrl} maxLength={4096} onChange={event => setImageUrl(event.target.value)} placeholder="Or paste an image URL (https://…)" />
+        <button className="secondary-button" disabled={!imageUrl.trim()}>Preview URL</button>
+      </div>
+      {directError && <p className="error-message" role="alert">{directError}</p>}
+    </form>
+    <div className="image-library__footer">
+      {googleImagesUrl && <a href={googleImagesUrl} target="_blank" rel="noreferrer">Open Google Images ↗</a>}
+      <button className="image-library__test" onClick={() => select(TEST_ASSET)}>Load built-in test graphic</button>
+    </div>
   </section>;
 }
 

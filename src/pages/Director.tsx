@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { Asset, PresentationSettings } from "../shared/types";
+import { useCallback, useEffect, useState } from "react";
+import type { Asset, PlaybackSample, PresentationSettings } from "../shared/types";
 import { DEFAULT_PRESENTATION } from "../shared/presentation";
 import { parseYouTubeVideoId } from "../shared/youtube";
 import { sendCommand } from "../commands";
@@ -19,6 +19,9 @@ export function Director() {
   const [previewVersion, setPreviewVersion] = useState(0);
   const [previewReady, setPreviewReady] = useState(false);
   const [presentation, setPresentation] = useState<PresentationSettings>(() => ({ ...DEFAULT_PRESENTATION }));
+  const [monitorSample, setMonitorSample] = useState<PlaybackSample | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const currentPresentation = program.presentation ?? DEFAULT_PRESENTATION;
 
   useEffect(() => {
@@ -57,8 +60,129 @@ export function Director() {
   }
 
   function goLive() {
-    if (program.mode === "graphic" && connected) void command("program:live");
+    if (connected) void command("program:live");
   }
+
+  async function forceSync() {
+    if (!connected || !program.videoId || syncing) return;
+    setSyncing(true);
+    setError(null);
+    try {
+      await sendCommand("program:force-sync");
+      setSyncNotice("Synced");
+      setTimeout(() => setSyncNotice(null), 2000);
+    } catch (failure) {
+      setError((failure as Error).message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  const togglePlayPause = useCallback(async () => {
+    if (!connected || !program.videoId) return;
+    try {
+      const action = program.playback.status === 'playing' ? 'pause' : 'play';
+      const position = monitorSample?.currentTime;
+      await sendCommand('program:playback', {
+        videoId: program.videoId,
+        playbackRevision: program.playback.revision,
+        action,
+        ...(typeof position === 'number' ? { position } : {})
+      });
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  }, [connected, program.videoId, program.playback.status, program.playback.revision, monitorSample?.currentTime]);
+
+  const skipVideo = useCallback(async (seconds: number) => {
+    if (!connected || !program.videoId) return;
+    try {
+      await sendCommand('program:playback', {
+        videoId: program.videoId,
+        playbackRevision: program.playback.revision,
+        action: 'skip',
+        seconds
+      });
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  }, [connected, program.videoId, program.playback.revision]);
+
+  const seekLive = useCallback(async () => {
+    if (!connected || !program.videoId) return;
+    try {
+      const dur = monitorSample?.duration;
+      await sendCommand('program:playback', {
+        videoId: program.videoId,
+        playbackRevision: program.playback.revision,
+        action: 'live',
+        ...(typeof dur === 'number' && dur > 0 ? { position: dur } : {})
+      });
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  }, [connected, program.videoId, program.playback.revision, monitorSample?.duration]);
+
+  // Global keyboard shortcuts for switching, playback, and layouts
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isInput = target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable ||
+        (target.tagName === 'SELECT' && event.key !== 'Escape')
+      );
+
+      if (event.key === 'Escape') {
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+          target.blur();
+          return;
+        }
+        if (program.mode === "graphic" && connected) {
+          event.preventDefault();
+          goLive();
+        }
+        return;
+      }
+
+      if (isInput) return;
+
+      if (event.key === 'Enter') {
+        if (preview && previewReady && connected) {
+          event.preventDefault();
+          takePreview();
+        }
+      } else if (event.key === ' ' || event.code === 'Space') {
+        event.preventDefault();
+        void togglePlayPause();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        void skipVideo(-10);
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        void skipVideo(10);
+      } else if (event.key === 'l' || event.key === 'L') {
+        event.preventDefault();
+        void seekLive();
+      } else if (event.key === 's' || event.key === 'S') {
+        event.preventDefault();
+        void forceSync();
+      } else if (event.key === '1') {
+        event.preventDefault();
+        setPresentation(p => ({ ...p, layout: 'shoulder' }));
+      } else if (event.key === '2') {
+        event.preventDefault();
+        setPresentation(p => ({ ...p, layout: 'pip' }));
+      } else if (event.key === '3') {
+        event.preventDefault();
+        setPresentation(p => ({ ...p, layout: 'image' }));
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [connected, preview, previewReady, program.mode, program.videoId, togglePlayPause, skipVideo, seekLive]);
 
   const onAirTitle = program.mode === "graphic" && program.activeAsset
     ? program.activeAsset.title
@@ -66,6 +190,10 @@ export function Director() {
   const onAirLayout = program.mode === "graphic"
     ? ({ shoulder: "Over the shoulder", pip: "Picture in picture", image: "Image only · video audio continues" } as const)[currentPresentation.layout]
     : "Main video · playback controls are shared";
+
+  const syncDrift = (outputPlayback && monitorSample && outputPlayback.videoId === monitorSample.videoId)
+    ? Math.abs(outputPlayback.currentTime - monitorSample.currentTime)
+    : null;
 
   return (
     <main className="director-shell compact-director">
@@ -78,7 +206,7 @@ export function Director() {
           <span className={`connection ${connected ? "online" : "offline"}`}>
             {connected ? "Connected" : "Reconnecting…"}
           </span>
-          <a className="secondary-button" href={appPath("output")} target="_blank" rel="noreferrer">
+          <a className="secondary-button" href={appPath("output")} target="_blank" rel="noreferrer" title="Open TV presentation screen in a new window">
             Open TV output
           </a>
         </div>
@@ -96,27 +224,117 @@ export function Director() {
             }}
             placeholder="Paste a YouTube URL or video ID"
           />
-          <button onClick={setVideo} disabled={!connected}>Set video</button>
+          <button onClick={setVideo} disabled={!connected} title="Load specified YouTube video">Set video</button>
         </div>
         {error && <p role="alert" className="error-message setup-error">{error}</p>}
       </section>
 
-      <section className="on-air-strip panel" aria-label="Current on-air program">
-        <span className={`program-badge ${program.mode}`}>{program.mode === "graphic" ? "IMAGE ON AIR" : "LIVE VIDEO"}</span>
-        {program.mode === "graphic" && program.activeAsset ? (
-          <AssetImage asset={program.activeAsset} thumbnail />
-        ) : (
-          <div className="on-air-video-icon" aria-hidden="true">▶</div>
-        )}
-        <div className="on-air-copy">
-          <span className="eyebrow">On TV now</span>
-          <strong title={onAirTitle}>{onAirTitle}</strong>
-          <span>{onAirLayout}</span>
+      <section className="on-air-strip panel master-switcher" aria-label="Master broadcast switcher and on-air program">
+        <div className="on-air-status">
+          <span className={`program-badge ${program.mode}`}>{program.mode === "graphic" ? "IMAGE ON AIR" : "LIVE VIDEO"}</span>
+          {program.mode === "graphic" && program.activeAsset ? (
+            <AssetImage asset={program.activeAsset} thumbnail />
+          ) : (
+            <div className="on-air-video-icon" aria-hidden="true">▶</div>
+          )}
+          <div className="on-air-copy">
+            <span className="eyebrow">On TV now</span>
+            <strong title={onAirTitle}>{onAirTitle}</strong>
+            <span>{onAirLayout}</span>
+          </div>
         </div>
-        <p className="revision">Revision {program.revision}</p>
-        <button className="live-button" onClick={goLive} disabled={!connected || program.mode !== "graphic"}>
-          <span className="live-dot" /> Back to video
-        </button>
+
+        <div className="master-controls" role="toolbar" aria-label="Centralized broadcast switching controls">
+          <div className="staged-status-pill" title={preview ? `Staged: ${preview.title}` : "Select an image from the library"}>
+            <span className="eyebrow">Staged</span>
+            <strong>{preview ? preview.title : "None"}</strong>
+            <span className={`staged-tag ${previewReady ? "is-ready" : ""}`}>
+              {preview ? (previewReady ? "Ready" : "Loading…") : "Empty"}
+            </span>
+          </div>
+
+          <button
+            className="take-button"
+            onClick={takePreview}
+            disabled={!preview || !previewReady || !connected}
+            title="Take staged image to TV · TAKE (Enter)"
+            aria-label="Show image on TV (Enter)"
+          >
+            Show image <span className="kbd-hint">TAKE · ↵</span>
+          </button>
+
+          <button
+            className="live-button"
+            onClick={goLive}
+            disabled={!connected}
+            title="Remove graphic and return to live video · LIVE (Esc)"
+            aria-label="Return to live video (Escape)"
+          >
+            <span className="live-dot" /> LIVE <span className="kbd-hint">Esc</span>
+          </button>
+
+          <div className="quick-layouts" role="group" aria-label="Quick layout selector">
+            <button
+              type="button"
+              className={`layout-pill ${presentation.layout === 'shoulder' ? 'active' : ''}`}
+              onClick={() => setPresentation(p => ({ ...p, layout: 'shoulder' }))}
+              title="Over the shoulder layout (1)"
+              aria-label="Over the shoulder (1)"
+            >
+              Shoulder <kbd>1</kbd>
+            </button>
+            <button
+              type="button"
+              className={`layout-pill ${presentation.layout === 'pip' ? 'active' : ''}`}
+              onClick={() => setPresentation(p => ({ ...p, layout: 'pip' }))}
+              title="Picture in picture layout (2)"
+              aria-label="Picture in picture (2)"
+            >
+              PiP <kbd>2</kbd>
+            </button>
+            <button
+              type="button"
+              className={`layout-pill ${presentation.layout === 'image' ? 'active' : ''}`}
+              onClick={() => setPresentation(p => ({ ...p, layout: 'image' }))}
+              title="Image only layout (3)"
+              aria-label="Image only (3)"
+            >
+              Image <kbd>3</kbd>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className={`force-sync-btn ${syncDrift && syncDrift >= 1.5 ? 'drift-warn' : ''}`}
+            onClick={forceSync}
+            disabled={!connected || !program.videoId || syncing}
+            title="Force TV output and Director monitor into sync (S)"
+            aria-label="Force synchronize stream (S)"
+          >
+            🔄 {syncNotice ?? (syncing ? "Syncing…" : "Force Sync")}
+            {syncDrift !== null && <span className="sync-drift-tag">{syncDrift < 1.0 ? "✓ Sync" : `Δ${syncDrift.toFixed(1)}s`}</span>}
+            <kbd>S</kbd>
+          </button>
+        </div>
+
+        <div className="strip-end">
+          <p className="revision">Revision {program.revision}</p>
+          <details className="shortcuts-help">
+            <summary title="Keyboard shortcuts guide" aria-label="Keyboard shortcuts guide">⌨</summary>
+            <div className="shortcuts-popover" role="tooltip">
+              <strong>Shortcuts</strong>
+              <ul>
+                <li><kbd>Enter</kbd> <span>TAKE staged image</span></li>
+                <li><kbd>Esc</kbd> <span>Back to video</span></li>
+                <li><kbd>Space</kbd> <span>Play / Pause</span></li>
+                <li><kbd>←</kbd> <kbd>→</kbd> <span>Skip 10s</span></li>
+                <li><kbd>L</kbd> <span>Seek to Live</span></li>
+                <li><kbd>S</kbd> <span>Force Sync</span></li>
+                <li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <span>Layouts</span></li>
+              </ul>
+            </div>
+          </details>
+        </div>
       </section>
 
       <section className="director-workspace" aria-label="Director console">
@@ -141,6 +359,7 @@ export function Director() {
             connected={connected}
             clockOffset={clockOffset}
             outputPlayback={outputPlayback}
+            onSample={setMonitorSample}
           />
           <p className="playback-independence">Pause, rewind, fast forward, and seek control the shared video. Changing image layout keeps video and audio running.</p>
         </article>
@@ -228,8 +447,8 @@ export function Director() {
 
           <div className="preview-actions">
             <span>{preview ? previewReady ? "Image loaded and ready to air" : "Wait for the full image to load" : "Choose an image to stage"}</span>
-            <button className="take-button" onClick={takePreview} disabled={!preview || !previewReady || !connected}>
-              Show image <span aria-hidden="true">· TAKE</span>
+            <button type="button" className="stage-take-trigger" onClick={takePreview} disabled={!preview || !previewReady || !connected} title="Take staged image to TV · TAKE (Enter)">
+              Show image <span aria-hidden="true">· TAKE ↵</span>
             </button>
           </div>
         </article>

@@ -4,11 +4,12 @@ import { readFileSync } from 'node:fs';
 import express from 'express';
 import { Server } from 'socket.io';
 import type { CommandAck, ProgramState, PlaybackCommand, PlaybackSample, OutputPlayback } from '../src/shared/types.js';
-import { isVideoTime } from '../src/shared/playback.js';
+import { isVideoTime, playbackPosition } from '../src/shared/playback.js';
 import { normalizeAsset } from '../src/shared/asset.js';
 import { ProgramStore } from './programState.js';
 import { LibraryStore } from './library.js';
 import { createImageSearchRouter } from './imageSearch.js';
+import { LdsLibraryProvider } from './ldsLibrary.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -35,7 +36,12 @@ app.get(`${basePath}/api/healthz`, (_req, res) => {
   res.json({ ok: true, revision: program.getState().revision, persistence: library && !persistenceError ? 'ok' : 'unavailable', build });
 });
 
-app.use(`${basePath}/api/images`, createImageSearchRouter());
+const ldsPath = process.env.LDS_PATH ?? path.resolve('data/lds');
+const lds = new LdsLibraryProvider(path.join(ldsPath, 'lds.sqlite'), `${basePath}/lds-media`);
+for (const dir of ['images', 'thumbs']) {
+  app.use(`${basePath}/lds-media/${dir}`, express.static(path.join(ldsPath, dir), { index: false, dotfiles: 'deny', maxAge: '30d', immutable: true }));
+}
+app.use(`${basePath}/api/images`, createImageSearchRouter(lds.available ? { lds } : {}));
 app.get(`${basePath}/api/library`, (_req,res) => {
   try {
     if (!library) throw new Error();
@@ -118,6 +124,23 @@ io.on('connection', socket => {
     runCommand(ack, () => program.take(normalizeAsset(payload?.asset), payload?.presentation), true);
   });
   socket.on('program:live', (ack?: unknown) => runCommand(ack, () => program.goLive()));
+  socket.on('program:force-sync', (ack?: unknown) => {
+    runCommand(ack, () => {
+      const state = program.getState();
+      if (!state.videoId) throw new Error('No video selected to synchronize.');
+      const observed = freshOutput();
+      const now = Date.now();
+      const position = observed && observed.duration > 0
+        ? Math.min(observed.duration, observed.currentTime + (observed.playerState === 1 ? (now - observed.receivedAt) / 1000 : 0))
+        : (playbackPosition(state.playback, now) ?? undefined);
+      return program.controlPlayback({
+        videoId: state.videoId,
+        playbackRevision: state.playback.revision,
+        action: 'seek',
+        position: position !== undefined && isVideoTime(position) ? Math.round(position * 10) / 10 : 0,
+      }, position, observed?.duration);
+    });
+  });
 });
 
 function runCommand(ack: unknown, command: () => ProgramState, taken = false) {
