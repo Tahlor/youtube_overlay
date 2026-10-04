@@ -2,7 +2,7 @@
 
 A lightweight browser-based live-program switcher for family viewing. The initial use case is General Conference: kids act as directors from a laptop while the family watches a shared program output on a TV.
 
-The product deliberately starts simple: both Director and Output play the original YouTube stream directly. Archimedes carries only control/state messages and, later, image-search/persistence traffic. No video transcoding or rebroadcasting is required for the MVP.
+Director and Output can use the original YouTube stream or a live camera input. Phone and director camera media travels peer to peer over WebRTC; the server carries Socket.IO signaling and shared Program state. No video transcoding is used.
 
 ## Live deployment
 
@@ -105,7 +105,7 @@ To test an already deployed target:
 BASE_URL=https://taylorarchibald.com/youtube_overlay EVIDENCE_DIR=/tmp/overlay-evidence npm run test:browser
 ```
 
-This test changes shared Program and finishes in LIVE. Server-restart validation on an external target requires `RESTART_SERVICE=app-youtube-overlay.service` and local sudo access. Autoplay event handling is also exercised with a clearly labeled simulated API event; real YouTube observations are recorded separately. Actual playback and audible sound depend on YouTube and the viewing browser.
+Set `DIRECTOR_ACCESS_KEY` in the test process for an authenticated production target. This test changes shared Program and finishes in LIVE. Server-restart validation on an external target requires `RESTART_SERVICE=app-youtube-overlay.service` and local sudo access. Autoplay event handling is also exercised with a clearly labeled simulated API event; real YouTube observations are recorded separately. Actual playback and audible sound depend on YouTube and the viewing browser.
 
 ## MVP status
 
@@ -117,6 +117,18 @@ Search federates Wikimedia Commons and Openverse; source and license links are a
 
 The Director fits the primary workflow at 1366×768 and 1440×900 with image results scrolling inside the library. Audience Output renders a full-screen broadcast stage with shoulder graphics, corner video PIP, or an image covering the video. Healthy playback shows no transport panel; moving the pointer briefly reveals output options. Fullscreen expands the whole composition. Cut, fade and slide are supported, with reduced-motion preferences respected. Presentation settings are persisted with Program and remain local staging until TAKE.
 
+Run `npm run test:input` after a build for native WebRTC camera, audio, privacy, reconnect and recovery regressions with Chromium fake capture devices. These checks do not replace real phone, TV and network testing.
+
 Run `npm run test:broadcast` after a build to validate desktop geometry, all three layouts, corner placement, player continuity, Back to video, streaming UI, pagination, stale-query cancellation and direct URL import. Media playback in this test is simulated; the ordinary browser suite records actual YouTube startup separately.
 
-**YouTube source limitations:** The app keeps the existing embed running underneath graphics and never extracts audio or changes the stream source. YouTube’s [required minimum functionality](https://developers.google.com/youtube/terms/required-minimum-functionality) restricts overlays obscuring the player, and its [developer policies](https://developers.google.com/youtube/terms/developer-policies) prohibit background players. Shoulder overlays and image-only audio should not be described as policy-supported YouTube integration. Image-only audio is a best-effort visual mode, subject to browser and YouTube behavior; actual playback/audio on this host may also be blocked by YouTube’s sign-in challenge.
+**YouTube source limitations:** While YouTube is selected, the existing embed stays mounted across graphic changes and supplies its own audio. The app never extracts that audio. YouTube’s [required minimum functionality](https://developers.google.com/youtube/terms/required-minimum-functionality) restricts overlays obscuring the player, and its [developer policies](https://developers.google.com/youtube/terms/developer-policies) prohibit background players. Shoulder overlays and image-only audio should not be described as policy-supported YouTube integration. Image-only audio is a best-effort visual mode, subject to browser and YouTube behavior; actual playback/audio on this host may also be blocked by YouTube’s sign-in challenge.
+
+## Live inputs
+
+Director has four phone slots and its own webcam slot. In production, Director switching, image TAKE/LIVE, sync controls and camera invites require a Director access key. The public Output retains native YouTube transport controls. If `DIRECTOR_ACCESS_KEY` is unset, the server generates one in `data/director-access-key` with owner-only permissions; open Director with `#access=KEY` once or enter it under **Phone camera links**. The browser stores it locally and removes the fragment from the address bar. Copy an invite from a phone slot and open it on that phone over HTTPS. Each invite belongs to one slot and to the current server session; restarting the server invalidates the link. A phone requests camera and microphone access only when **Start** is pressed. The Director webcam works the same way. The local Director preview is muted.
+
+Choose a connected input to put it on Output. Camera inputs are live, so YouTube pause, rewind, fast forward and seek apply only when YouTube is selected. Switching away records the last YouTube playback position; switching back resumes from that position. A selected camera disconnect returns Output to the saved YouTube feed. If only one viewer’s WebRTC route fails or times out, that viewer shows the saved YouTube feed with a connection error and **Retry camera**; the public viewer cannot change the shared Program. **Start camera** and **Start audio** recover blocked autoplay, including when an image is on air. Existing shoulder, picture in picture, image-only layouts and transitions use whichever input is selected.
+
+Audio follows the selected source by default. Director can set each input's volume and mute, or choose a separate camera microphone. YouTube can provide audio only while its video is selected; the app does not run a hidden YouTube player for audio. Output receives the selected camera’s video track and the selected camera microphone as a separate audio track. Unselected or muted camera microphones are not delivered to public viewers. Invite tokens stay on the phone join links and never appear in Output URLs.
+
+WebRTC uses public STUN by default. Restrictive networks, symmetric NATs or firewalls may require a TURN relay. Set `VITE_TURN_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` before building to add one. Camera/microphone capture requires a secure browser context (HTTPS or localhost). Browser autoplay rules may require a user gesture on Output before sound starts.

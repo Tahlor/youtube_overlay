@@ -19,6 +19,7 @@ async function stop() { if (server?.exitCode === null) await new Promise(resolve
 const base = process.env.BASE_URL ?? await start();
 const browser = await chromium.launch({ executablePath: '/usr/local/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+if (process.env.DIRECTOR_ACCESS_KEY) await context.addInitScript(key => localStorage.setItem('overlay-director-access', key), process.env.DIRECTOR_ACCESS_KEY);
 // A deterministic IFrame API validates commands and recovery without claiming real YouTube media playback.
 await context.addInitScript(() => {
   window.__players = [];
@@ -32,7 +33,7 @@ await context.addInitScript(() => {
     playVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 1; this.events.onStateChange({ data: 1, target: this }); }
     pauseVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 2; this.events.onStateChange({ data: 2, target: this }); }
     seekTo(time) { this.time = time; this.at = Date.now(); this.seeks.push(time); }
-    mute() {} unMute() {} destroy() { this.frame.remove(); }
+    mute() {} unMute() {} setVolume() {} destroy() { this.frame.remove(); }
   } };
 });
 const director = await context.newPage(), output = await context.newPage();
@@ -86,6 +87,27 @@ try {
   await director.getByRole('button', { name: '▶ Play', exact: true }).waitFor();
   await output.waitForTimeout(2500); await output.evaluate(() => window.__players.at(-1).seekTo(600)); await waitPosition(director, 600);
   record('Native YouTube pause and seek also update shared playback');
+  await director.locator('h1').click();
+  await director.keyboard.press('Space'); await waitPosition(output, 600, 1); await waitPosition(director, 600, 1);
+  await director.getByRole('button', { name: 'Ⅱ Pause', exact: true }).waitFor();
+  await director.keyboard.press('Space'); await output.waitForFunction(() => window.__players.at(-1)?.state === 2);
+  await director.getByRole('button', { name: '▶ Play', exact: true }).waitFor();
+  await director.waitForFunction(() => window.__players.at(-1)?.state === 2);
+  const beforeSkip = await output.evaluate(() => window.__players.at(-1).getCurrentTime());
+  await director.keyboard.press('ArrowLeft'); await waitPosition(output, beforeSkip - 10); await waitPosition(director, beforeSkip - 10);
+  await director.keyboard.press('ArrowRight'); await waitPosition(output, beforeSkip); await waitPosition(director, beforeSkip);
+  await director.keyboard.press('l'); await waitPosition(output, 7200, 1); await waitPosition(director, 7200, 1);
+  await director.keyboard.press('s'); await director.locator('.force-sync-btn').filter({ hasText: 'Synced' }).waitFor();
+  for (const [key, layout] of [['1', 'shoulder'], ['2', 'pip'], ['3', 'image']]) {
+    await director.keyboard.press(key);
+    await director.waitForFunction(layout => document.querySelector('[aria-label="Image layout"]')?.value === layout, layout);
+  }
+  await director.getByRole('button', { name: 'Load built-in test graphic', exact: true }).click();
+  await director.waitForFunction(() => !document.querySelector('.take-button').disabled);
+  await director.locator('h1').click(); await director.keyboard.press('Enter');
+  await output.locator('.output-shell.graphic-mode.layout-image').waitFor();
+  await director.keyboard.press('Escape'); await output.locator('.output-shell.live-mode').waitFor();
+  record('Merged switcher shortcuts retain playback, live head, force sync, layouts and TAKE/LIVE');
   await director.setViewportSize({ width: 390, height: 844 }); await director.screenshot({ path: path.join(evidence, 'director-mobile.png'), fullPage: true });
   assert.equal(await director.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await director.setViewportSize({ width: 1440, height: 1000 }); await director.screenshot({ path: path.join(evidence, 'director.png'), fullPage: true });

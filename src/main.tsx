@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Director } from "./pages/Director";
 import { Output } from "./pages/Output";
+import { Phone } from "./pages/Phone";
 import { appPath, currentAppPath } from "./basePath";
 import "./styles.css";
 
@@ -9,6 +10,7 @@ function App() {
   const path = currentAppPath();
   if (path === "/director") return <Director />;
   if (path === "/output") return <Output />;
+  if (path === "/phone") return <Phone />;
 
   return (
     <main className="landing-shell">

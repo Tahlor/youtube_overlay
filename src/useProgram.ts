@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import type { ProgramState, OutputPlayback, PlaybackSample } from "./shared/types";
 import { socket } from "./socket";
 import { DEFAULT_PRESENTATION } from "./shared/presentation";
+import { defaultAudio } from "./shared/input";
 
 const initialState: ProgramState = {
   videoId: null,
+  source: 'youtube',
+  audio: defaultAudio(),
   mode: "live",
   activeAsset: null,
   revision: 0,

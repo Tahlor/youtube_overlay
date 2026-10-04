@@ -21,6 +21,7 @@ async function stop() { if(server?.exitCode===null) await new Promise(resolve=>{
 const base=process.env.BASE_URL?.replace(/\/$/,'') ?? await (async()=>{temp=mkdtempSync(path.join(tmpdir(),'overlay-browser-'));return start();})();
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH??'/usr/local/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
 const directorContext=await browser.newContext({viewport:{width:1440,height:1100}});
+if (process.env.DIRECTOR_ACCESS_KEY) await directorContext.addInitScript(key => localStorage.setItem('overlay-director-access', key), process.env.DIRECTOR_ACCESS_KEY);
 const outputContext=await browser.newContext({viewport:{width:1440,height:900}});
 const director=await directorContext.newPage(),output=await outputContext.newPage();
 const pageErrors=[];for(const page of [director,output]) page.on('pageerror',error=>pageErrors.push(error.message));
@@ -129,7 +130,7 @@ try {
   const recoveryContext=await browser.newContext();
   await recoveryContext.addInitScript(()=>{window.YT={Player:class {
     constructor(frame,{events}){this.events=events;setTimeout(()=>{events.onReady({target:this});events.onAutoplayBlocked({target:this});},50);}
-    mute(){} unMute(){} playVideo(){if(this.started)this.events.onStateChange({data:1,target:this});this.started=true;}
+    mute(){} unMute(){} setVolume(){} playVideo(){if(this.started)this.events.onStateChange({data:1,target:this});this.started=true;}
     pauseVideo(){this.events.onStateChange({data:2,target:this});} seekTo(){} getCurrentTime(){return 0;} getDuration(){return 0;} getPlayerState(){return this.started?1:-1;} destroy(){}
   }};});
   const recovery=await recoveryContext.newPage();await recovery.goto(`${base}/output`, { waitUntil: 'domcontentloaded' });

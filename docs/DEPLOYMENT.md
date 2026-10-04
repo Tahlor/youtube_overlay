@@ -8,6 +8,7 @@ The M0–M3 application is deployed on Archimedes as a single Node process behin
 - Director: `https://taylorarchibald.com/youtube_overlay/director`
 - TV output: `https://taylorarchibald.com/youtube_overlay/output`
 - Android TV APK: `https://taylorarchibald.com/youtube_overlay/downloads/youtube-overlay-tv.apk`
+- Phone join: a source-specific link generated in Director (`/youtube_overlay/phone?source=…&token=…`)
 - Health: `https://taylorarchibald.com/youtube_overlay/api/healthz`
 - Socket.IO path: `/youtube_overlay/socket.io`
 
@@ -38,6 +39,8 @@ HOST=127.0.0.1
 PORT=13050
 BASE_PATH=/youtube_overlay
 ```
+
+Phone media uses direct WebRTC. The build can include `VITE_TURN_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` if a TURN relay is required for restrictive networks. STUN alone may fail through symmetric NAT or restrictive firewalls. Phone capture requires HTTPS; the public URL already supplies it. Invite tokens are created in memory on server startup and must be regenerated after a restart. Do not publish invite links or append their tokens to the public Output URL. In production, the server creates `data/director-access-key` (mode 0600) when `DIRECTOR_ACCESS_KEY` is unset. Production Director commands (source/video selection, image TAKE/LIVE and sync) require this key; public Output retains native YouTube playback controls. Open Director once with `#access=KEY` or enter the key under **Phone camera links**; the browser stores it locally and removes the fragment from the address bar. Preserve this key file with other runtime data.
 
 ## systemd
 

@@ -7,7 +7,7 @@ import { sendCommand } from '../commands';
 interface Player {
   playVideo(): void; pauseVideo(): void; seekTo(seconds: number, allowSeekAhead: boolean): void;
   getCurrentTime(): number; getDuration(): number; getPlayerState(): number;
-  mute(): void; unMute(): void; destroy(): void;
+  mute(): void; unMute(): void; setVolume(volume: number): void; destroy(): void;
 }
 interface API { Player: new (iframe: HTMLIFrameElement, options: { events: Record<string, (event: { data: number; target: Player }) => void> }) => Player }
 declare global { interface Window { YT?: API; onYouTubeIframeAPIReady?: () => void } }
@@ -27,12 +27,12 @@ function loadAPI(): Promise<API> {
 }
 
 interface Props {
-  videoId: string | null; title: string; muted?: boolean; className?: string;
+  videoId: string | null; title: string; muted?: boolean; volume?: number; className?: string;
   playback: PlaybackState; connected: boolean; clockOffset: number;
   outputPlayback?: OutputPlayback | null; onSample?: (sample: PlaybackSample) => void;
   audience?: boolean; compact?: boolean;
 }
-export function YouTubePlayer({ videoId, title, muted = false, className = '', playback, connected, clockOffset, outputPlayback, onSample, audience = false, compact = false }: Props) {
+export function YouTubePlayer({ videoId, title, muted = false, volume = 100, className = '', playback, connected, clockOffset, outputPlayback, onSample, audience = false, compact = false }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Player | null>(null);
   const readyRef = useRef(false);
@@ -52,6 +52,8 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
   const audienceToolbarTimer = useRef<number | null>(null);
   const latest = useRef({ videoId, playback, connected, clockOffset, onSample, status });
   latest.current = { videoId, playback, connected, clockOffset, onSample, status };
+  const audioSettings = useRef({ muted, volume });
+  audioSettings.current = { muted, volume };
 
   const scheduleAudienceToolbarHide = useCallback((delay = 2500) => {
     if (audienceToolbarTimer.current !== null) window.clearTimeout(audienceToolbarTimer.current);
@@ -128,13 +130,14 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
         onReady: ({ target }) => {
           if (disposed) return;
           readyRef.current = true; setReady(true);
-          if (muted) target.mute();
+          target.setVolume(audioSettings.current.volume);
+          if (audioSettings.current.muted) target.mute(); else target.unMute();
           setStatus('Ready. Press Start video if playback is paused.');
           applyPlayback(target);
         },
         onStateChange: ({ data, target }) => {
           if (disposed) return;
-          if (data === 1) { clearTimeout(startup); setStatus(muted ? 'Playing · monitor muted' : 'Playing'); }
+          if (data === 1) { clearTimeout(startup); setStatus(audioSettings.current.muted && !audience ? 'Playing · monitor muted' : 'Playing'); }
           else if (data === 0) setStatus('Video ended. Seek backward to replay or choose another video.');
           else if (data === 2) { clearTimeout(startup); setStatus('Paused'); }
           else if (data === 3) setStatus('Buffering…');
@@ -172,7 +175,13 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
       disposed = true; readyRef.current = false; clearTimeout(startup); clearInterval(poll);
       player.current?.destroy(); player.current = null; container.current?.replaceChildren();
     };
-  }, [videoId, muted, title, retry, audience]);
+  }, [videoId, title, retry, audience]);
+
+  useEffect(() => {
+    if (!readyRef.current || !player.current) return;
+    player.current.setVolume(volume);
+    if (muted) player.current.mute(); else player.current.unMute();
+  }, [muted, volume]);
 
   useEffect(() => {
     if (readyRef.current && player.current && appliedRevision.current !== playback.revision) applyPlayback(player.current);

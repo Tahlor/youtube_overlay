@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AssetImage } from '../components/AssetImage';
 import { Attribution } from '../components/Attribution';
 import { YouTubePlayer } from '../components/YouTubePlayer';
 import { DEFAULT_PRESENTATION } from '../shared/presentation';
 import type { Asset, PresentationSettings } from '../shared/types';
+import { effectiveAudioSource } from '../shared/input';
+import { useInputReceiver } from '../media/useInputReceiver';
 import { useProgram } from '../useProgram';
 import '../broadcast.css';
 
@@ -12,8 +14,36 @@ const TRANSITION_MS = 350;
 export function Output() {
   const { program, connected, clockOffset, reportPlayback } = useProgram();
   const presentation = program.presentation ?? DEFAULT_PRESENTATION;
+  const selected = program.source ?? 'youtube';
+  const audio = program.audio;
+  const camera = useInputReceiver(selected, selected !== 'youtube', 'video');
+  // A viewer's media route can fail even while the phone is still signaling.
+  // Fall back locally without letting a public viewer change everyone's Program.
+  const cameraFallback = selected !== 'youtube' && camera.failed && Boolean(program.videoId);
+  const fallbackPlayback = useMemo(() => ({ ...program.playback, updatedAt: Date.now() }), [camera.failed, selected]);
+  const requestedAudio = effectiveAudioSource(cameraFallback ? 'youtube' : selected, audio);
+  const audioSource = cameraFallback && requestedAudio === selected ? 'youtube' : requestedAudio;
+  const level = audio.levels[audioSource];
+  const receiveCameraAudio = audioSource !== 'youtube' && !level.muted && level.volume > 0;
+  const separateAudio = useInputReceiver(audioSource, receiveCameraAudio, 'audio');
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = camera.stream;
+  }, [camera.stream, selected, cameraFallback]);
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.srcObject = separateAudio.stream;
+  }, [separateAudio.stream, audioSource, cameraFallback]);
+  useEffect(() => {
+    if (cameraVideoRef.current) cameraVideoRef.current.volume = 0;
+    if (audioRef.current) audioRef.current.volume = level.volume / 100;
+  }, [audioSource, selected, level.volume, cameraFallback]);
   const graphicActive = program.mode === 'graphic' && Boolean(program.activeAsset);
   const [heldGraphic, setHeldGraphic] = useState<Asset | null>(program.activeAsset);
+  const [cameraPlayBlocked, setCameraPlayBlocked] = useState(false);
+  const [audioPlayBlocked, setAudioPlayBlocked] = useState(false);
+  useEffect(() => { setCameraPlayBlocked(false); setAudioPlayBlocked(false); }, [selected, audioSource, cameraFallback]);
+  useEffect(() => { setAudioPlayBlocked(false); }, [receiveCameraAudio]);
 
   // Keep the outgoing graphic for the short transition back to live video.
   useEffect(() => {
@@ -46,17 +76,32 @@ export function Output() {
 
     {/* One mounted player stays in place while the image stage changes around it. */}
     <aside className="program-live-side audience-video-stage" aria-label="Live video">
-      <YouTubePlayer
+      {selected === 'youtube' || cameraFallback ? <YouTubePlayer
         videoId={program.videoId}
         title="Live program video"
         className="program-video"
-        playback={program.playback}
-        connected={connected}
-        clockOffset={clockOffset}
-        onSample={reportPlayback}
+        playback={cameraFallback ? fallbackPlayback : program.playback}
+        connected={connected && !cameraFallback}
+        clockOffset={cameraFallback ? 0 : clockOffset}
+        onSample={cameraFallback ? undefined : reportPlayback}
+        muted={audioSource !== 'youtube' || level.muted || level.volume === 0}
+        volume={audioSource === 'youtube' ? level.volume : 0}
         audience
-      />
+      /> : <div className="camera-output">
+        <video ref={cameraVideoRef} autoPlay playsInline muted
+          aria-label={`${selected} live camera`}
+          onLoadedMetadata={event => { void event.currentTarget.play().then(() => setCameraPlayBlocked(false)).catch(() => setCameraPlayBlocked(true)); }} />
+        {camera.status !== 'Live' && <div className="camera-status" role="status">{camera.error ?? camera.status}</div>}
+      </div>}
     </aside>
+    {cameraPlayBlocked && camera.stream && !cameraFallback && <div className="camera-recovery" role="status">Camera is ready. <button onClick={() => void cameraVideoRef.current?.play().then(() => setCameraPlayBlocked(false)).catch(() => {})}>Start camera</button></div>}
+    {camera.failed && <div className="camera-recovery camera-error" role="alert"><span>{camera.error} {cameraFallback && 'Showing saved YouTube.'}</span><button onClick={camera.retry}>Retry camera</button></div>}
+    {receiveCameraAudio && <audio ref={audioRef} autoPlay
+      muted={level.muted || level.volume === 0}
+      onLoadedMetadata={event => { event.currentTarget.volume = level.volume / 100; void event.currentTarget.play().then(() => setAudioPlayBlocked(false)).catch(() => setAudioPlayBlocked(true)); }}
+      onVolumeChange={event => { if (Math.abs(event.currentTarget.volume - level.volume / 100) > 0.01) event.currentTarget.volume = level.volume / 100; }} />}
+    {separateAudio.error && <div className="camera-recovery audio-error" role="alert"><span>Audio input: {separateAudio.error}</span><button onClick={separateAudio.retry}>Retry audio</button></div>}
+    {receiveCameraAudio && separateAudio.stream && audioPlayBlocked && <div className="camera-recovery audio-recovery" role="status">Audio is ready. <button onClick={() => void audioRef.current?.play().then(() => setAudioPlayBlocked(false)).catch(() => {})}>Start audio</button></div>}
 
     {/* Image-only overlays the still-running embed; YouTube's public policies prohibit obscuring an embed or using it as a background player. */}
     <section

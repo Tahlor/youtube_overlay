@@ -16,6 +16,7 @@ const base = await new Promise((resolve, reject) => {
 });
 const browser = await chromium.launch({ executablePath: '/usr/local/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+if (process.env.DIRECTOR_ACCESS_KEY) await context.addInitScript(key => localStorage.setItem('overlay-director-access', key), process.env.DIRECTOR_ACCESS_KEY);
 await context.addInitScript(() => {
   window.__players = [];
   window.YT = { Player: class {
@@ -25,7 +26,7 @@ await context.addInitScript(() => {
     playVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 1; this.events.onStateChange({ data: 1, target: this }); }
     pauseVideo() { this.time = this.getCurrentTime(); this.at = Date.now(); this.state = 2; this.events.onStateChange({ data: 2, target: this }); }
     seekTo(time) { this.time = time; this.at = Date.now(); }
-    mute() { this.muted = true; } unMute() { this.muted = false; } destroy() { this.destroyed = true; this.frame.remove(); }
+    mute() { this.muted = true; } unMute() { this.muted = false; } setVolume() {} destroy() { this.destroyed = true; this.frame.remove(); }
   } };
 });
 await context.route('https://www.youtube.com/embed/**', route => route.fulfill({ contentType: 'text/html', body: '<html><body style="margin:0;height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 40% 30%,#637b91,#163345 60%,#061921);color:white;font:600 30px system-ui"><div style="text-align:center"><div style="font-size:80px">◉</div>VIDEO FEED<div style="font-size:16px;font-weight:400;margin-top:10px;opacity:.6">Simulated broadcast playback</div></div></body></html>' }));
