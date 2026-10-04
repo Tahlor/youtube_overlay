@@ -10,7 +10,8 @@
     "test": "tsx --test tests/*.test.ts",
     "check": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && npm test && npm run build",
     "test:browser": "node tests/browser.mjs",
-    "test:playback": "node tests/playback-browser.mjs"
+    "test:playback": "node tests/playback-browser.mjs",
+    "test:broadcast": "node tests/broadcast-browser.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

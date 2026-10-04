@@ -1,5 +1,13 @@
 export type ProgramMode = "live" | "graphic";
 
+export interface PresentationSettings {
+  layout: 'shoulder' | 'pip' | 'image';
+  corner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  size: 'small' | 'medium' | 'large';
+  transition: 'cut' | 'fade' | 'slide';
+  fit: 'contain' | 'cover';
+}
+
 export interface Asset {
   id: string;
   title: string;
@@ -18,6 +26,7 @@ export interface ProgramState {
   activeAsset: Asset | null;
   revision: number;
   playback: PlaybackState;
+  presentation: PresentationSettings;
 }
 
 export interface PlaybackState {

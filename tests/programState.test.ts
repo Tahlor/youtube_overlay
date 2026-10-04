@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ProgramStore } from "../server/programState.js";
 import type { Asset } from "../src/shared/types.js";
+import { DEFAULT_PRESENTATION } from "../src/shared/presentation.js";
 
 const asset: Asset = {
   id: "test",
@@ -17,6 +18,7 @@ test("starts in a safe live state", () => {
     activeAsset: null,
     revision: 0,
     playback: { status: "playing", position: null, updatedAt: 0, revision: 0 },
+    presentation: DEFAULT_PRESENTATION,
   });
 });
 

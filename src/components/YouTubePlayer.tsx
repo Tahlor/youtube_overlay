@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { OutputPlayback, PlaybackCommand, PlaybackSample, PlaybackState } from '../shared/types';
 import { formatTime, isVideoTime, parseTime, playbackPosition } from '../shared/playback';
 import { sendCommand } from '../commands';
@@ -29,8 +30,9 @@ interface Props {
   videoId: string | null; title: string; muted?: boolean; className?: string;
   playback: PlaybackState; connected: boolean; clockOffset: number;
   outputPlayback?: OutputPlayback | null; onSample?: (sample: PlaybackSample) => void;
+  audience?: boolean; compact?: boolean;
 }
-export function YouTubePlayer({ videoId, title, muted = false, className = '', playback, connected, clockOffset, outputPlayback, onSample }: Props) {
+export function YouTubePlayer({ videoId, title, muted = false, className = '', playback, connected, clockOffset, outputPlayback, onSample, audience = false, compact = false }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Player | null>(null);
   const readyRef = useRef(false);
@@ -41,12 +43,42 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
   const [retry, setRetry] = useState(0);
   const [sample, setSample] = useState<PlaybackSample | null>(null);
   const [seekDraft, setSeekDraft] = useState<number | null>(null);
+  const seekDraftRef = useRef<number | null>(null);
   const [timeInput, setTimeInput] = useState('');
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [audienceToolbarVisible, setAudienceToolbarVisible] = useState(false);
+  const audienceToolbarTimer = useRef<number | null>(null);
   const latest = useRef({ videoId, playback, connected, clockOffset, onSample, status });
   latest.current = { videoId, playback, connected, clockOffset, onSample, status };
+
+  const scheduleAudienceToolbarHide = useCallback((delay = 2500) => {
+    if (audienceToolbarTimer.current !== null) window.clearTimeout(audienceToolbarTimer.current);
+    audienceToolbarTimer.current = window.setTimeout(() => {
+      const toolbar = container.current?.closest('[data-broadcast-output]')?.querySelector('.audience-toolbar');
+      if (toolbar?.contains(document.activeElement)) return;
+      setAudienceToolbarVisible(false);
+      audienceToolbarTimer.current = null;
+    }, delay);
+  }, []);
+  const revealAudienceToolbar = useCallback(() => {
+    setAudienceToolbarVisible(true);
+    scheduleAudienceToolbarHide();
+  }, [scheduleAudienceToolbarHide]);
+
+  useEffect(() => {
+    if (!audience) return;
+    const root = container.current?.closest('[data-broadcast-output]');
+    if (!root) return;
+    root.addEventListener('pointermove', revealAudienceToolbar);
+    root.addEventListener('pointerenter', revealAudienceToolbar);
+    return () => {
+      root.removeEventListener('pointermove', revealAudienceToolbar);
+      root.removeEventListener('pointerenter', revealAudienceToolbar);
+      if (audienceToolbarTimer.current !== null) window.clearTimeout(audienceToolbarTimer.current);
+    };
+  }, [audience, videoId, revealAudienceToolbar]);
 
   function applyPlayback(target: Player) {
     const { playback: next, clockOffset: offset } = latest.current;
@@ -73,6 +105,7 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
 
   useEffect(() => {
     readyRef.current = false; setReady(false); setSample(null); setSeekDraft(null); setError(null);
+    seekDraftRef.current = null;
     appliedRevision.current = -1;
     if (!videoId || !container.current) return;
     let disposed = false;
@@ -81,7 +114,7 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
     setStatus('Loading YouTube…');
     const frame = document.createElement('iframe'); frame.title = title;
     frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'; frame.referrerPolicy = 'strict-origin-when-cross-origin'; frame.allowFullscreen = true;
-    const params = new URLSearchParams({ autoplay: latest.current.playback.status === 'paused' ? '0' : '1', playsinline: '1', rel: '0', enablejsapi: '1', origin: window.location.origin, mute: muted ? '1' : '0' });
+    const params = new URLSearchParams({ autoplay: latest.current.playback.status === 'paused' ? '0' : '1', controls: audience ? '0' : '1', disablekb: audience ? '1' : '0', playsinline: '1', rel: '0', enablejsapi: '1', origin: window.location.origin, mute: muted ? '1' : '0' });
     frame.src = `https://www.youtube.com/embed/${videoId}?${params}`;
     container.current.replaceChildren(frame);
     const startup = window.setTimeout(() => { if (!disposed && latest.current.playback.status === 'playing') setStatus('Video has not started. Press Start video or retry.'); }, 15000);
@@ -135,13 +168,13 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
       disposed = true; readyRef.current = false; clearTimeout(startup); clearInterval(poll);
       player.current?.destroy(); player.current = null; container.current?.replaceChildren();
     };
-  }, [videoId, muted, title, retry]);
+  }, [videoId, muted, title, retry, audience]);
 
   useEffect(() => {
     if (readyRef.current && player.current && appliedRevision.current !== playback.revision) applyPlayback(player.current);
   }, [playback, clockOffset]);
 
-  if (!videoId) return <div className={`youtube-placeholder ${className}`}><div><strong>No YouTube video selected</strong><span>Set the stream from the Director console.</span></div></div>;
+  if (!videoId) return <div className={`youtube-placeholder ${className} ${audience ? 'audience-empty' : ''}`}><div><strong>{audience ? 'Waiting for live video' : 'No YouTube video selected'}</strong>{!audience && <span>Set the stream from the Director console.</span>}</div></div>;
   const freshOutput = outputPlayback?.videoId === videoId && outputPlayback.playbackRevision === playback.revision && Date.now() + clockOffset - outputPlayback.receivedAt < 5000 ? outputPlayback : null;
   const localSample = sample?.videoId === videoId ? sample : null;
   const timeline = freshOutput ?? (localSample?.playbackRevision === playback.revision ? localSample : null);
@@ -149,9 +182,58 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
   const position = timeline?.currentTime ?? playbackPosition(playback, Date.now() + clockOffset) ?? 0;
   const disabled = !connected || pending;
   const canSeek = !disabled && duration > 0;
-  function commitSeek() { if (seekDraft !== null) { void control('seek', { position: seekDraft }); setSeekDraft(null); } }
-  return <div className={`youtube-player ${className}`}>
+  function commitSeek() {
+    const position = seekDraftRef.current;
+    if (position !== null) {
+      seekDraftRef.current = null;
+      void control('seek', { position });
+      setSeekDraft(null);
+    }
+  }
+  function startVideo() {
+    if (player.current && ready) {
+      if (!muted) player.current.unMute();
+      if (audience) {
+        // Keep a real user gesture on the player so browser autoplay recovery can work.
+        if (latest.current.playback.status === 'paused') ignoreNativeUntil.current = 0;
+        player.current.playVideo();
+      } else if (latest.current.playback.status === 'paused') void control('play'); else applyPlayback(player.current);
+    } else setRetry(value => value + 1);
+  }
+  const recoveryNeeded = audience && status !== 'Loading YouTube…' && status !== 'Ready. Press Start video if playback is paused.' && status !== 'Playing' && status !== 'Paused' && status !== 'Buffering…';
+  const playerControls = <div className="player-controls">
+    <span role="status">{status}</span>
+    <button onClick={startVideo}>Start video</button>
+    <button onClick={() => setRetry(value => value + 1)}>Retry player</button>
+    <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noreferrer">Open YouTube</a>
+  </div>;
+  const audienceRoot = audience ? container.current?.closest<HTMLElement>('[data-broadcast-output]') : null;
+  function requestAudienceFullscreen() {
+    const target = container.current?.closest<HTMLElement>('[data-broadcast-output]');
+    if (!target?.requestFullscreen) return;
+    void target.requestFullscreen().catch(() => revealAudienceToolbar());
+  }
+  const audienceOverlay = audience && audienceRoot ? createPortal(recoveryNeeded ? <div className="audience-recovery" role="status">
+    <span>{status}</span>
+    <button onClick={startVideo}>Start video</button>
+    <button onClick={() => setRetry(value => value + 1)}>Retry player</button>
+    <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noreferrer">Open YouTube</a>
+  </div> : <div className={`audience-toolbar ${audienceToolbarVisible ? 'is-visible' : ''}`} role="toolbar" aria-label="Video options"
+    onFocus={() => {
+      if (audienceToolbarTimer.current !== null) window.clearTimeout(audienceToolbarTimer.current);
+      audienceToolbarTimer.current = null;
+      setAudienceToolbarVisible(true);
+    }}
+    onBlur={() => scheduleAudienceToolbarHide(350)}>
+    <button onClick={requestAudienceFullscreen}>Fullscreen</button>
+    <button onClick={() => setRetry(value => value + 1)}>Retry player</button>
+    <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noreferrer">Open YouTube</a>
+  </div>, audienceRoot) : null;
+
+  return <div className={`youtube-player ${audience ? 'audience-player' : ''} ${compact ? 'compact-player' : ''} ${className}`}>
     <div ref={container} className="youtube-frame" />
+    {audienceOverlay}
+    {!audience && <>
     <div className="transport-controls" aria-label="Shared video playback">
       <div className="transport-buttons">
         <button disabled={!canSeek} onClick={() => void control('skip', { seconds: -10 })} aria-label="Rewind 10 seconds">⏪ −10s</button>
@@ -162,7 +244,7 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
         <span className="playback-time">{formatTime(seekDraft ?? position)} / {duration ? formatTime(duration) : '—'}</span>
       </div>
       <input className="seek-slider" type="range" aria-label="Seek video" aria-valuetext={formatTime(seekDraft ?? position)} min="0" max={duration || 1} step="1" value={Math.min(duration || 1, seekDraft ?? position)} disabled={!canSeek}
-        onChange={event => setSeekDraft(Number(event.target.value))} onPointerUp={commitSeek} onPointerCancel={() => setSeekDraft(null)}
+        onChange={event => { seekDraftRef.current = Number(event.target.value); setSeekDraft(seekDraftRef.current); }} onPointerUp={commitSeek} onPointerCancel={() => { seekDraftRef.current = null; setSeekDraft(null); }}
         onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) commitSeek(); }} onBlur={commitSeek} />
       <form className="seek-form" onSubmit={event => {
         event.preventDefault(); const seconds = parseTime(timeInput);
@@ -178,16 +260,7 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
       {duration === 0 && <p className="transport-note">Waiting for YouTube timing. Live rewind and seeking require DVR on the stream.</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
     </div>
-    <div className="player-controls">
-      <span role="status">{status}</span>
-      <button onClick={() => {
-        if (player.current && ready) {
-          if (!muted) player.current.unMute();
-          if (latest.current.playback.status === 'paused') void control('play'); else applyPlayback(player.current);
-        } else setRetry(value => value + 1);
-      }}>Start video</button>
-      <button onClick={() => setRetry(value => value + 1)}>Retry player</button>
-      <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noreferrer">Open YouTube</a>
-    </div>
+    {compact ? <details className="compact-player-details"><summary>Player options</summary>{playerControls}</details> : playerControls}
+    </>}
   </div>;
 }

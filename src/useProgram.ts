@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ProgramState, OutputPlayback, PlaybackSample } from "./shared/types";
 import { socket } from "./socket";
+import { DEFAULT_PRESENTATION } from "./shared/presentation";
 
 const initialState: ProgramState = {
   videoId: null,
@@ -8,6 +9,7 @@ const initialState: ProgramState = {
   activeAsset: null,
   revision: 0,
   playback: { status: "playing", position: null, updatedAt: 0, revision: 0 },
+  presentation: { ...DEFAULT_PRESENTATION },
 };
 
 export function useProgram() {

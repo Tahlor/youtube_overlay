@@ -2,6 +2,7 @@ import type { Asset, ProgramState, PlaybackCommand, PlaybackState } from "../src
 import { isVideoTime, playbackPosition, MAX_VIDEO_SECONDS } from "../src/shared/playback.js";
 import { normalizeAsset } from "../src/shared/asset.js";
 import { isYouTubeVideoId } from "../src/shared/youtube.js";
+import { DEFAULT_PRESENTATION, normalizePresentation } from "../src/shared/presentation.js";
 
 export class ProgramStore {
   private state: ProgramState = {
@@ -10,9 +11,10 @@ export class ProgramStore {
     activeAsset: null,
     revision: 0,
     playback: { status: "playing", position: null, updatedAt: 0, revision: 0 },
+    presentation: { ...DEFAULT_PRESENTATION },
   };
 
-  constructor(saved?: (Omit<ProgramState, 'playback'> & { playback?: PlaybackState }) | null) {
+  constructor(saved?: (Omit<ProgramState, 'playback' | 'presentation'> & { playback?: PlaybackState; presentation?: unknown }) | null) {
     if (saved) {
       if (saved.videoId !== null && !isYouTubeVideoId(saved.videoId)) throw new Error("Invalid saved video.");
       if (!Number.isSafeInteger(saved.revision) || saved.revision < 0) throw new Error("Invalid saved revision.");
@@ -23,7 +25,12 @@ export class ProgramStore {
         throw new Error("Invalid saved playback.");
       }
       // Resume from the saved point after a process restart; downtime is not viewing time.
-      this.state = { ...saved, playback: { ...playback, updatedAt: playback.status === 'playing' && playback.position !== null ? Date.now() : playback.updatedAt }, activeAsset: saved.mode === "graphic" ? normalizeAsset(saved.activeAsset) : null };
+      this.state = {
+        ...saved,
+        playback: { ...playback, updatedAt: playback.status === 'playing' && playback.position !== null ? Date.now() : playback.updatedAt },
+        presentation: normalizePresentation(saved.presentation),
+        activeAsset: saved.mode === "graphic" ? normalizeAsset(saved.activeAsset) : null,
+      };
     }
   }
 
@@ -70,12 +77,14 @@ export class ProgramStore {
     return this.getState();
   }
 
-  take(asset: Asset): ProgramState {
+  take(asset: Asset, presentation?: unknown): ProgramState {
     const valid = normalizeAsset(asset);
+    const settings = presentation === undefined ? this.state.presentation : normalizePresentation(presentation);
     this.state = {
       ...this.state,
       mode: "graphic",
       activeAsset: valid,
+      presentation: settings,
       revision: this.state.revision + 1,
     };
     return this.getState();

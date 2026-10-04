@@ -33,7 +33,7 @@ Both browsers load the YouTube player directly. Archimedes coordinates only Prog
 
 - Render canonical Program state only.
 - In `live` mode, show the YouTube player as the dominant view.
-- In `graphic` mode, show the active graphic as dominant and retain the YouTube player visibly alongside it.
+- In `graphic` mode, compose the taken presentation around the same mounted player: shoulder card, corner video PIP, or full-stage image.
 - Never invent local Program changes.
 
 ### Server
@@ -66,6 +66,7 @@ export interface ProgramState {
   activeAsset: Asset | null;
   revision: number;
   playback: { status: "playing" | "paused"; position: number | null; updatedAt: number; revision: number };
+  presentation: { layout: "shoulder" | "pip" | "image"; corner: "top-left" | "top-right" | "bottom-left" | "bottom-right"; size: "small" | "medium" | "large"; transition: "cut" | "fade" | "slide"; fit: "contain" | "cover" };
 }
 ```
 
@@ -100,7 +101,7 @@ This explicit resync exists in addition to the server's automatic state message 
 `program:take`
 
 ```ts
-{ asset: Asset }
+{ asset: Asset, presentation?: PresentationSettings }
 ```
 
 `program:live`
@@ -230,8 +231,14 @@ These can be added only when a demonstrated need outweighs their operational cos
 
 Assets are normalized and bounded at the server boundary. URL protocols are restricted to HTTPS or app-relative paths; provider markup is rendered as plain text. Invalid commands never alter Program. Acknowledgements are checked as functions before invocation. Director mutation commands expire after four seconds, resync after a missing acknowledgement, and are never queued while disconnected.
 
-Output keeps a single YouTube iframe/player mounted across LIVE/graphic layouts. The IFrame API reports startup, playback state, errors and blocked autoplay; Start video and Retry player remain available alongside a YouTube link. Controls occupy their own area and never obscure the embedded player. Director monitoring stays muted. Player readiness does not govern Program switching.
+Output keeps a single YouTube iframe/player mounted across LIVE/graphic layouts. The IFrame API reports startup, playback state, errors and blocked autoplay; Start video and Retry player remain available alongside a YouTube link. Director transport controls occupy their own area. Audience transport controls are omitted during healthy playback; temporary options and recovery use a portal above the composed stage. Covering layouts keep the player running but are subject to YouTube source limitations documented in Product. Director monitoring stays muted. Player readiness does not govern Program switching.
 
 Build metadata at `/build.json` and in `/api/healthz` identifies the source commit and frontend asset names. API and route HTML responses avoid stale caching; Vite assets carry content hashes.
 
 References: [Commons image metadata API](https://www.mediawiki.org/wiki/API:Imageinfo), [YouTube IFrame API](https://developers.google.com/youtube/iframe_api_reference), [Node SQLite API](https://nodejs.org/api/sqlite.html).
+
+## Progressive search and presentation
+
+`createImageSearchRouter` owns JSON compatibility at `/api/images/search` and NDJSON streaming at `/api/images/search/stream`. Source pages execute concurrently; each emits a `provider` event as it finishes, followed by a `done` event containing an opaque continuation cursor. Cursors are bound to the query and selected sources; exhausted sources are omitted on later pages. Provider requests abort on client disconnect, use bounded deadlines, and share a bounded cache/concurrency limit. The client parses chunked lines, deduplicates assets, cancels superseded searches, and retains partial results when one source fails. Sources fetch public metadata; images still load directly from their hosts.
+
+`ProgramState.presentation` is validated with explicit enum choices and migrates from legacy snapshots to PIP/bottom-right/medium/fade/contain. TAKE stores the asset and presentation atomically without changing playback. Back to video clears the active asset and preserves presentation/playback. Local staged choices sync only when canonical presentation values actually change, so ordinary playback updates cannot discard staging. Output never rebuilds its iframe for layout changes. CSS handles the stage geometry and transitions, honors reduced motion, and keeps the outgoing graphic long enough to finish a return transition.

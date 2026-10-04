@@ -101,3 +101,22 @@ test('shared playback socket commands, TV timing, stale rejection and paused res
     clients.forEach(client => client.disconnect()); if (running?.child.exitCode === null) await stop(running.child); rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('presentation socket TAKE validates layouts and restores settings independently of playback', { timeout: 20000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'overlay-presentation-server-')); const clients: Socket[] = [];
+  let running: Awaited<ReturnType<typeof start>> | undefined;
+  try {
+    running = await start(path.join(dir, 'db.sqlite'));
+    const director = await connect(running.url), output = await connect(running.url); clients.push(director.socket, output.socket);
+    const asset = { id: 'test', title: 'Test graphic', fullUrl: `${prefix}/test-graphic.svg` };
+    const presentation = { layout: 'image', corner: 'top-left', size: 'large', transition: 'slide', fit: 'cover' };
+    assert.equal((await command(director.socket, 'program:take', { asset, presentation })).ok, true);
+    const saved = await state(output.socket); assert.deepEqual(saved.presentation, presentation);
+    assert.equal((await command(director.socket, 'program:take', { asset, presentation: { ...presentation, layout: 'invalid' } })).ok, false);
+    assert.deepEqual(await state(output.socket), saved);
+    await command(director.socket, 'program:live'); const live = await state(output.socket);
+    assert.equal(live.activeAsset, null); assert.deepEqual(live.presentation, presentation); assert.deepEqual(live.playback, saved.playback);
+    clients.forEach(client => client.disconnect()); await stop(running.child); running = await start(path.join(dir, 'db.sqlite'));
+    const restored = await connect(running.url); clients.push(restored.socket); assert.deepEqual(restored.state, live);
+  } finally { clients.forEach(client => client.disconnect()); if (running?.child.exitCode === null) await stop(running.child); rmSync(dir, { recursive: true, force: true }); }
+});

@@ -29,15 +29,15 @@ Only explicit commands change Program.
 ### Core commands
 
 - **SET VIDEO** — choose the YouTube stream/video.
-- **TAKE** — promote the selected Preview asset to Program.
-- **LIVE** — return Program to the live-video layout.
+- **SHOW IMAGE · TAKE** — promote the selected Preview asset and staged presentation to Program.
+- **BACK TO VIDEO** — remove the taken graphic and return Program to the main video layout; the underlying socket command remains `program:live`.
 - **PAUSE / PLAY** — pause or resume shared playback on the monitor and TV.
 - **REWIND / FAST FORWARD** — skip backward or forward ten seconds.
 - **SEEK** — choose a time with the scrubber or seconds, `mm:ss`, or `hh:mm:ss` entry. Seeking while paused preserves pause.
 
 Playback and layout are independent: TAKE and LIVE preserve playback. Shared playback commands and the paused position survive reconnect/reload/restart. Native YouTube transport interactions also send shared commands. The TV reports recent timing and player status to Director; command acknowledgement confirms server acceptance, while TV feedback indicates whether the player is running. Live seeking depends on the stream's DVR window. Browser autoplay restrictions may require pressing Start video on the TV.
 
-LIVE is the safety action and should remain obvious and available even if optional subsystems fail.
+Back to video is the clear safety action and remains independent of image search and persistence. Pause and playback position are preserved when removing a graphic.
 
 ## Program layouts
 
@@ -45,7 +45,15 @@ LIVE is the safety action and should remain obvious and available even if option
 The YouTube player is the dominant/full output view.
 
 ### Graphic
-A selected graphic becomes dominant while the YouTube player remains visible in a side/PIP region. The embedded player is not covered by a custom overlay.
+The Director stages one of three presentations before TAKE:
+
+- **Over the shoulder:** full-frame video with a graphic in the chosen corner.
+- **Picture in picture:** full-frame graphic with the same video player inset in the chosen corner.
+- **Image only:** full-frame graphic covering the still-playing video; the app does not mute or pause the player.
+
+Four corner choices, three sizes, contain/cover image fit, and cut/fade/slide transitions are supported. The audience sees a clean stage, with player recovery appearing only when needed. Fullscreen expands the composed stage.
+
+YouTube restricts obscuring embedded players and prohibits background players. The requested covering layouts are implemented as browser composition, but image-only audio is best effort and cannot be represented as policy-supported YouTube behavior. A controlled media source would be needed to guarantee unrestricted broadcast composition.
 
 We may revisit true compositing/rebroadcasting later, but it is not required for the browser-switcher MVP.
 
@@ -65,7 +73,7 @@ We may revisit true compositing/rebroadcasting later, but it is not required for
 ### M1 — image search
 
 - Search field and results grid.
-- One initial image provider behind an interface.
+- Commons and Openverse behind a shared interface, with streamed provider batches, pagination, deduplication, cancellation and partial failure handling. Google Images discovery and public HTTPS image import are available.
 - Selecting a result affects Preview only.
 - TAKE sends the selected asset to Program.
 - Search failure cannot break Program controls.
@@ -114,3 +122,5 @@ Potential polish includes quick topic buttons, transitions, a phone emergency re
 4. **Few moving pieces.** Avoid a media pipeline until we know we need one.
 5. **Kid-readable UI.** Large obvious controls beat dense professional-broadcast complexity.
 6. **Recoverable.** Refreshing pages should not destroy the current Program state.
+
+The compact desktop console keeps source playback, image search, staged composition and switching within one screen at 1366×768 and 1440×900; results scroll inside the library. Selecting presentation settings is local Preview work and playback commands must not discard staged choices.

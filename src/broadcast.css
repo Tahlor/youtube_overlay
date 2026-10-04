@@ -1,0 +1,387 @@
+/* Audience stage and the Director's compact monitor controls. */
+main.output-shell.broadcast-output.broadcast-output {
+  position: relative;
+  display: block;
+  isolation: isolate;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+}
+
+.output-shell.broadcast-output.broadcast-output .program-live-side {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 200px;
+  min-height: 200px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: #000;
+  pointer-events: none;
+  transition: inset 350ms ease, width 350ms ease, height 350ms ease, border-radius 350ms ease, box-shadow 350ms ease;
+}
+
+.output-shell.broadcast-output.broadcast-output .audience-player {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.output-shell.broadcast-output.broadcast-output .audience-player .youtube-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 200px;
+  min-height: 200px;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+.output-shell.broadcast-output.broadcast-output .audience-player .youtube-frame iframe {
+  width: 100%;
+  height: 100%;
+  min-width: 200px;
+  min-height: 200px;
+}
+
+.output-shell.broadcast-output.broadcast-output .audience-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  place-items: center;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+  color: #8d99a9;
+  background: #000;
+}
+
+.output-shell.broadcast-output.broadcast-output .program-graphic {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, 16px, 0);
+  transition: opacity 350ms ease, transform 350ms ease, visibility 0s linear 350ms;
+}
+
+.output-shell.broadcast-output.broadcast-output .program-graphic.is-active {
+  opacity: 1;
+  visibility: visible;
+  transform: translate3d(0, 0, 0);
+  transition: opacity 350ms ease, transform 350ms ease, visibility 0s;
+}
+
+.output-shell.broadcast-output.broadcast-output .graphic-media {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #05070b;
+  box-shadow: none;
+  transition: inset 350ms ease, width 350ms ease, height 350ms ease, border-radius 350ms ease, box-shadow 350ms ease;
+}
+
+.output-shell.broadcast-output.broadcast-output .graphic-image-stack,
+.output-shell.broadcast-output.broadcast-output .graphic-image-current,
+.output-shell.broadcast-output.broadcast-output .graphic-image-leaving {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.output-shell.broadcast-output.broadcast-output .graphic-image-stack img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: #05070b;
+}
+
+.output-shell.broadcast-output.broadcast-output.fit-contain .graphic-image-stack img { object-fit: contain; }
+.output-shell.broadcast-output.broadcast-output.fit-cover .graphic-image-stack img { object-fit: cover; }
+
+.output-shell.broadcast-output.broadcast-output .graphic-image-leaving {
+  z-index: 1;
+  animation: broadcast-image-fade-out 350ms ease both;
+}
+
+.output-shell.broadcast-output.broadcast-output .graphic-image-leaving.slide {
+  animation-name: broadcast-image-slide-out;
+}
+
+.output-shell.broadcast-output.broadcast-output .graphic-image-leaving.cut { animation-duration: 1ms; }
+
+.output-shell.broadcast-output.broadcast-output .image-error {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 20px;
+  text-align: center;
+  background: #10131a;
+}
+
+/* Shoulder: the graphic is a card over the full-frame video. */
+.output-shell.broadcast-output.broadcast-output.layout-shoulder .graphic-media {
+  inset: auto;
+  width: clamp(220px, 30vw, 760px);
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgba(255,255,255,.82);
+  border-radius: 10px;
+  box-shadow: 0 12px 50px rgba(0,0,0,.58);
+  pointer-events: auto;
+}
+
+.output-shell.broadcast-output.broadcast-output.layout-shoulder.size-small .graphic-media { width: clamp(210px, 21vw, 520px); }
+.output-shell.broadcast-output.broadcast-output.layout-shoulder.size-medium .graphic-media { width: clamp(240px, 30vw, 760px); }
+.output-shell.broadcast-output.broadcast-output.layout-shoulder.size-large .graphic-media { width: clamp(280px, 40vw, 980px); }
+
+.output-shell.broadcast-output.broadcast-output.layout-shoulder.corner-top-left .graphic-media { top: 5vh; left: 4vw; }
+.output-shell.broadcast-output.broadcast-output.layout-shoulder.corner-top-right .graphic-media { top: 5vh; right: 4vw; }
+.output-shell.broadcast-output.broadcast-output.layout-shoulder.corner-bottom-left .graphic-media { bottom: 5vh; left: 4vw; }
+.output-shell.broadcast-output.broadcast-output.layout-shoulder.corner-bottom-right .graphic-media { bottom: 5vh; right: 4vw; }
+
+/* Picture in picture: full frame graphic with the live video inset above it. */
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip .program-live-side {
+  z-index: 3;
+  inset: auto;
+  width: clamp(240px, 28vw, 760px);
+  height: auto;
+  min-height: 200px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgba(255,255,255,.92);
+  border-radius: 10px;
+  box-shadow: 0 12px 50px rgba(0,0,0,.65);
+}
+
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.size-small .program-live-side {
+  width: clamp(220px, 20vw, 540px);
+}
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.size-medium .program-live-side {
+  width: clamp(240px, 28vw, 760px);
+}
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.size-large .program-live-side {
+  width: clamp(280px, 38vw, 980px);
+}
+
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.corner-top-left .program-live-side { top: 4vh; left: 3vw; }
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.corner-top-right .program-live-side { top: 4vh; right: 3vw; }
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.corner-bottom-left .program-live-side { bottom: 4vh; left: 3vw; }
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.corner-bottom-right .program-live-side { bottom: 4vh; right: 3vw; }
+
+/* Image only: the opaque graphic sits over the still-mounted full-size video. */
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-image .program-live-side {
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-image .program-graphic { z-index: 2; }
+.output-shell.broadcast-output.broadcast-output.graphic-mode.layout-image .graphic-media { background: #05070b; }
+
+.output-shell.broadcast-output.broadcast-output.transition-cut .program-live-side,
+.output-shell.broadcast-output.broadcast-output.transition-cut .program-graphic,
+.output-shell.broadcast-output.broadcast-output.transition-cut .graphic-media {
+  transition-duration: 0ms;
+}
+
+.output-shell.broadcast-output.broadcast-output.transition-slide .program-graphic.is-inactive { transform: translate3d(0, 24px, 0); }
+
+.output-shell.broadcast-output.broadcast-output .audience-info {
+  position: absolute;
+  z-index: 5;
+  right: 22px;
+  bottom: 22px;
+  pointer-events: auto;
+}
+.output-shell.broadcast-output.broadcast-output .audience-info summary {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.48);
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0,0,0,.42);
+  font-size: 20px;
+  cursor: pointer;
+  list-style: none;
+  backdrop-filter: blur(8px);
+}
+.output-shell.broadcast-output.broadcast-output .audience-info summary::-webkit-details-marker { display: none; }
+.output-shell.broadcast-output.broadcast-output .audience-info-card {
+  position: absolute;
+  right: 0;
+  bottom: 44px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px 14px;
+  color: #f8fafc;
+  background: rgba(3,7,14,.9);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 9px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.45);
+  backdrop-filter: blur(10px);
+}
+.output-shell.broadcast-output.broadcast-output .audience-info-card strong { display: block; overflow-wrap: anywhere; }
+.output-shell.broadcast-output.broadcast-output .audience-info-card .attribution { margin: 6px 0 0; font-size: .75rem; }
+
+.output-shell.broadcast-output.broadcast-output.corner-top-left .audience-info { top: auto; right: 22px; bottom: 22px; left: auto; }
+.output-shell.broadcast-output.broadcast-output.corner-top-right .audience-info { top: auto; right: auto; bottom: 22px; left: 22px; }
+.output-shell.broadcast-output.broadcast-output.corner-bottom-left .audience-info { top: 22px; right: 22px; bottom: auto; left: auto; }
+.output-shell.broadcast-output.broadcast-output.corner-bottom-right .audience-info { top: 22px; right: auto; bottom: auto; left: 22px; }
+.output-shell.broadcast-output.broadcast-output.corner-bottom-left .audience-info-card,
+.output-shell.broadcast-output.broadcast-output.corner-bottom-right .audience-info-card { top: 44px; bottom: auto; }
+
+.output-shell.broadcast-output.broadcast-output .audience-toolbar,
+.output-shell.broadcast-output.broadcast-output .audience-recovery {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px;
+  color: #fff;
+  font-size: .8rem;
+  background: rgba(3,7,14,.82);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 9px;
+  backdrop-filter: blur(10px);
+}
+
+.output-shell.broadcast-output.broadcast-output .audience-toolbar {
+  right: 14px;
+  bottom: 14px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.output-shell.broadcast-output.broadcast-output .audience-toolbar.is-visible,
+.output-shell.broadcast-output.broadcast-output .audience-toolbar:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.output-shell.broadcast-output.broadcast-output .audience-toolbar button,
+.output-shell.broadcast-output.broadcast-output .audience-recovery button,
+.output-shell.broadcast-output.broadcast-output .audience-toolbar a,
+.output-shell.broadcast-output.broadcast-output .audience-recovery a {
+  padding: 7px 9px;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 6px;
+  color: #fff;
+  text-decoration: none;
+  background: rgba(255,255,255,.1);
+}
+.output-shell.broadcast-output.broadcast-output .audience-recovery {
+  left: 50%;
+  bottom: 22px;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+}
+.output-shell.broadcast-output.broadcast-output .audience-recovery span { max-width: 42vw; }
+.output-shell.broadcast-output.broadcast-output .connection-ribbon {
+  z-index: 12;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 10px;
+  opacity: .85;
+  font-size: .72rem;
+}
+
+/* Keep every Director playback action usable while reducing the monitor footprint. */
+.compact-player.compact-player .transport-controls {
+  padding: 6px;
+}
+.compact-player.compact-player .transport-buttons { gap: 5px; }
+.compact-player.compact-player .transport-controls button {
+  min-height: 34px;
+  padding: 5px 8px;
+  font-size: .8rem;
+}
+.compact-player.compact-player .transport-controls .play-pause { min-width: 84px; }
+.compact-player.compact-player .playback-time { font-size: .76rem; }
+.compact-player.compact-player .seek-slider { min-height: 20px; margin: 5px 0; }
+.compact-player.compact-player .seek-form { gap: 5px; }
+.compact-player.compact-player .seek-form input { width: 128px; padding: 6px 8px; font-size: .8rem; }
+.compact-player.compact-player .seek-form button { min-height: 32px; padding: 5px 8px; }
+.compact-player.compact-player .transport-note { margin-top: 5px; font-size: .72rem; }
+.compact-player.compact-player .compact-player-details { font-size: .78rem; }
+.compact-player.compact-player .compact-player-details > summary {
+  padding: 6px 8px;
+  color: #a9bbd2;
+  cursor: pointer;
+}
+.compact-player.compact-player .player-controls { gap: 6px; padding: 6px; font-size: .72rem; }
+.compact-player.compact-player .player-controls button { padding: 6px 8px; }
+
+@keyframes broadcast-image-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes broadcast-image-slide-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(0, -14px, 0); }
+}
+
+@media (max-width: 700px) {
+  .output-shell.broadcast-output.broadcast-output.layout-shoulder.size-small .graphic-media { width: min(68vw, 430px); }
+  .output-shell.broadcast-output.broadcast-output.layout-shoulder.size-medium .graphic-media { width: min(78vw, 520px); }
+  .output-shell.broadcast-output.broadcast-output.layout-shoulder.size-large .graphic-media { width: min(88vw, 620px); }
+  .output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip .program-live-side,
+  .output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.size-small .program-live-side,
+  .output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.size-medium .program-live-side,
+  .output-shell.broadcast-output.broadcast-output.graphic-mode.layout-pip.size-large .program-live-side {
+    width: min(48vw, 360px);
+  }
+  .output-shell.broadcast-output.broadcast-output .audience-info { right: 10px; bottom: 10px; }
+  .output-shell.broadcast-output.broadcast-output .audience-recovery { flex-wrap: wrap; justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .output-shell.broadcast-output.broadcast-output *,
+  .output-shell.broadcast-output.broadcast-output *::before,
+  .output-shell.broadcast-output.broadcast-output *::after,
+  .compact-player.compact-player * {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* A fade changes opacity; the slide preset also moves the graphic. */
+.output-shell.broadcast-output.broadcast-output.transition-fade .program-graphic { transform: none; }

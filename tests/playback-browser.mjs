@@ -43,13 +43,13 @@ async function waitPosition(page, time, state = 2) {
   await page.waitForFunction(({ time, state }) => { const player = window.__players.at(-1); return player?.state === state && Math.abs(player.getCurrentTime() - time) < (state === 1 ? 5 : 1); }, { time, state });
 }
 try {
-  await Promise.all([director.goto(`${base}/director`), output.goto(`${base}/output`)]);
+  await Promise.all([director.goto(`${base}/director`, { waitUntil: 'domcontentloaded' }), output.goto(`${base}/output`, { waitUntil: 'domcontentloaded' })]);
   await director.getByText('Connected', { exact: true }).waitFor();
   await director.getByLabel('YouTube stream or video').fill('aqz-KE-bpKQ'); await director.getByRole('button', { name: 'Set video', exact: true }).click();
   await director.waitForFunction(() => !document.querySelector('.play-pause')?.disabled);
   await director.getByText(/TV: Playing/).waitFor();
   await director.getByRole('button', { name: 'Ⅱ Pause', exact: true }).click();
-  await output.getByRole('button', { name: '▶ Play', exact: true }).waitFor();
+  await output.waitForFunction(() => window.__players.at(-1)?.state === 2);
   const frozen = await output.evaluate(() => window.__players.at(-1).getCurrentTime());
   await output.waitForTimeout(1200);
   assert.ok(Math.abs(await output.evaluate(() => window.__players.at(-1).getCurrentTime()) - frozen) < .01);
@@ -59,7 +59,7 @@ try {
   await director.getByRole('button', { name: 'Rewind 10 seconds', exact: true }).click(); await waitPosition(output, 3713);
   await director.getByRole('button', { name: 'Fast forward 10 seconds', exact: true }).click(); await waitPosition(output, 3723);
   record('Timestamp seeking, rewind and fast forward preserve a shared pause');
-  const slider = director.getByLabel('Seek video', { exact: true }); await slider.focus(); await slider.press('Home'); await waitPosition(output, 0);
+  const slider = director.getByLabel('Seek video', { exact: true }); await director.waitForFunction(() => !document.querySelector('.seek-slider').disabled); await slider.focus(); await slider.press('Home'); await waitPosition(output, 0);
   await director.waitForFunction(() => !document.querySelector('.seek-slider').disabled);
   await slider.press('ArrowRight'); await waitPosition(output, 1);
   record('Keyboard scrubbing commits exact shared seeks');
@@ -78,8 +78,8 @@ try {
   assert.equal(await output.evaluate(() => window.__players.length), 1);
   await director.locator('.live-button').click(); await output.locator('.output-shell.live-mode').waitFor(); await waitPosition(output, 300);
   record('TAKE/LIVE preserve pause and player identity');
-  await Promise.all([director.reload(), output.reload()]); await waitPosition(output, 300); await waitPosition(director, 300);
-  if (!process.env.BASE_URL) { await stop(); await start(); await director.getByText('Connected', { exact: true }).waitFor(); await Promise.all([director.reload(), output.reload()]); await waitPosition(output, 300); }
+  await Promise.all([director.reload({ waitUntil: 'domcontentloaded' }), output.reload({ waitUntil: 'domcontentloaded' })]); await waitPosition(output, 300); await waitPosition(director, 300);
+  if (!process.env.BASE_URL) { await stop(); await start(); await director.getByText('Connected', { exact: true }).waitFor(); await Promise.all([director.reload({ waitUntil: 'domcontentloaded' }), output.reload({ waitUntil: 'domcontentloaded' })]); await waitPosition(output, 300); }
   record('Paused position restores after both browser reloads and an isolated real server restart');
   await director.getByRole('button', { name: '▶ Play', exact: true }).click(); await waitPosition(output, 300, 1);
   await output.waitForTimeout(2500); await output.evaluate(() => window.__players.at(-1).pauseVideo());

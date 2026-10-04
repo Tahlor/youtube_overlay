@@ -4,8 +4,18 @@ import { appPath } from '../basePath';
 import { socket } from '../socket';
 import { AssetImage } from './AssetImage';
 import { Attribution } from './Attribution';
+import './search.css';
 
 export const TEST_ASSET: Asset = { id: 'm0-test-graphic', title: 'General Conference Director test graphic', fullUrl: appPath('test-graphic.svg'), thumbnailUrl: appPath('test-graphic.svg'), source: 'Built in' };
+
+type SearchProvider = 'all' | 'commons' | 'openverse';
+type ProviderName = Exclude<SearchProvider, 'all'>;
+type ProviderProgress = { state: 'loading' | 'done' | 'error'; count: number; error?: string };
+type SearchContext = { query: string; provider: SearchProvider };
+type SearchEvent =
+  | { type: 'start'; query: string; providers: ProviderName[] }
+  | { type: 'provider'; provider: ProviderName; assets: Asset[]; nextCursor: string | null; error?: string }
+  | { type: 'done'; cursor: string | null; hasMore: boolean; providers: { provider: ProviderName; status: 'ok' | 'error'; nextCursor: string | null }[] };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(appPath(url), { ...init, signal: init?.signal ?? AbortSignal.timeout(15000) });
@@ -13,62 +23,328 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   if (!res.ok) throw new Error(data.error ?? 'Request failed.');
   return data as T;
 }
+
 export function ImageLibrary({ preview, select }: { preview: Asset | null; select: (asset: Asset) => void }) {
-  const [query,setQuery] = useState('');
-  const [results,setResults] = useState<Asset[]>([]);
-  const [tab,setTab] = useState<'Search'|'Favorites'|'Recent'>('Search');
-  const [library,setLibrary] = useState<Library>({ favorites: [], recent: [] });
-  const [busy,setBusy] = useState(false);
-  const [searched,setSearched] = useState(false);
-  const [searchError,setSearchError] = useState('');
-  const [libraryError,setLibraryError] = useState('');
-  const [saving,setSaving] = useState(false);
+  const [query, setQuery] = useState('');
+  const [provider, setProvider] = useState<SearchProvider>('all');
+  const [results, setResults] = useState<Asset[]>([]);
+  const [tab, setTab] = useState<'Search' | 'Favorites' | 'Recent'>('Search');
+  const [library, setLibrary] = useState<Library>({ favorites: [], recent: [] });
+  const [busy, setBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [directError, setDirectError] = useState('');
+  const [libraryError, setLibraryError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
+  const [progress, setProgress] = useState<Partial<Record<ProviderName, ProviderProgress>>>({});
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [searchContext, setSearchContext] = useState<SearchContext | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const searchAbort = useRef<AbortController | null>(null);
+  const generation = useRef(0);
+  const resultRef = useRef<Asset[]>([]);
+
   const refresh = useCallback(() => {
     request<Library>('api/library').then(data => { setLibrary(data); setLibraryError(''); }).catch(error => setLibraryError(error.message));
-  },[]);
+  }, []);
+
   useEffect(() => {
-    refresh(); socket.on('library:changed',refresh); socket.on('connect',refresh);
-    return () => { socket.off('library:changed',refresh); socket.off('connect',refresh); searchAbort.current?.abort(); };
-  },[refresh]);
-  async function search() {
+    refresh();
+    socket.on('library:changed', refresh);
+    socket.on('connect', refresh);
+    return () => {
+      generation.current++;
+      socket.off('library:changed', refresh);
+      socket.off('connect', refresh);
+      searchAbort.current?.abort();
+    };
+  }, [refresh]);
+
+  async function runSearch(loadNext = false) {
+    const targetQuery = loadNext ? searchContext?.query ?? '' : query.trim();
+    const targetProvider = loadNext ? searchContext?.provider ?? provider : provider;
+    if (targetQuery.length < 2 || (loadNext && !nextCursor)) return;
     searchAbort.current?.abort();
-    const controller = new AbortController(); searchAbort.current = controller;
-    setBusy(true); setSearchError(''); setTab('Search');
+    const controller = new AbortController();
+    searchAbort.current = controller;
+    const requestId = ++generation.current;
+    const cursor = loadNext ? nextCursor : null;
+    setBusy(true);
+    setLoadingMore(loadNext);
+    setSearchError('');
+    setDirectError('');
+    setTab('Search');
+    if (!loadNext) {
+      resultRef.current = [];
+      setResults([]);
+      setSearched(false);
+      setSearchContext({ query: targetQuery, provider: targetProvider });
+      setNextCursor(null);
+      setHasMore(false);
+    }
+    const initialProgress: Partial<Record<ProviderName, ProviderProgress>> = {};
+    (targetProvider === 'all' ? ['commons', 'openverse'] : [targetProvider]).forEach(name => {
+      initialProgress[name as ProviderName] = { state: 'loading', count: 0 };
+    });
+    setProgress(initialProgress);
+
+    let receivedDone = false;
     try {
-      const data = await request<{assets:Asset[]}>(`api/images/search?q=${encodeURIComponent(query.trim())}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
-      if (!controller.signal.aborted) { setResults(data.assets); setSearched(true); }
+      const params = new URLSearchParams({ q: targetQuery, provider: targetProvider });
+      if (cursor) params.set('cursor', cursor);
+      const response = await fetch(appPath('api/images/search/stream?' + params), {
+        headers: { Accept: 'application/x-ndjson' },
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(25000)]),
+      });
+      if (!response.ok) {
+        let message = 'Image search is unavailable. Try again shortly.';
+        try { message = (await response.json()).error ?? message; } catch { /* use the default */ }
+        throw new Error(message);
+      }
+      if (!response.body) throw new Error('This browser cannot stream search results.');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      const applyLine = (line: string) => {
+        if (!line.trim() || requestId !== generation.current || controller.signal.aborted) return;
+        let event: SearchEvent;
+        try { event = JSON.parse(line) as SearchEvent; } catch { return; }
+        if (event.type === 'start') {
+          const waiting: Partial<Record<ProviderName, ProviderProgress>> = {};
+          event.providers.forEach(name => { waiting[name] = { state: 'loading', count: 0 }; });
+          setProgress(waiting);
+        } else if (event.type === 'provider') {
+          const merged = mergeAssets(resultRef.current, event.assets);
+          resultRef.current = merged;
+          setResults(merged);
+          setProgress(current => ({
+            ...current,
+            [event.provider]: {
+              state: event.error ? 'error' : 'done',
+              count: event.assets.length,
+              ...(event.error ? { error: event.error } : {}),
+            },
+          }));
+        } else if (event.type === 'done') {
+          receivedDone = true;
+          setNextCursor(event.cursor);
+          setHasMore(event.hasMore);
+          setSearched(true);
+          setProgress(current => {
+            const updated = { ...current };
+            event.providers.forEach(source => {
+              updated[source.provider] = {
+                state: source.status === 'error' ? 'error' : 'done',
+                count: updated[source.provider]?.count ?? 0,
+                ...(updated[source.provider]?.error ? { error: updated[source.provider]?.error } : {}),
+              };
+            });
+            return updated;
+          });
+        }
+      };
+      while (requestId === generation.current && !controller.signal.aborted) {
+        const chunk = await reader.read();
+        pending += decoder.decode(chunk.value, { stream: !chunk.done });
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        lines.forEach(applyLine);
+        if (chunk.done) break;
+      }
+      if (pending.trim()) applyLine(pending);
+      if (!controller.signal.aborted && requestId === generation.current && !receivedDone) {
+        throw new Error('Image search ended before all sources returned.');
+      }
     } catch (error) {
-      if (!controller.signal.aborted) setSearchError(error instanceof Error ? error.message : 'Image search unavailable.');
-    } finally { if (!controller.signal.aborted) setBusy(false); }
+      if (!controller.signal.aborted && requestId === generation.current) {
+        setSearchError(error instanceof Error ? error.message : 'Image search unavailable.');
+      }
+    } finally {
+      if (requestId === generation.current) {
+        setBusy(false);
+        setLoadingMore(false);
+      }
+    }
   }
+
+  function cancelSearch() {
+    searchAbort.current?.abort();
+    generation.current++;
+    setBusy(false);
+    setLoadingMore(false);
+    setProgress({});
+  }
+
+  function discardActiveSearch() {
+    cancelSearch();
+    resultRef.current = [];
+    setResults([]);
+    setSearchContext(null);
+    setNextCursor(null);
+    setHasMore(false);
+    setSearched(false);
+    setSearchError('');
+  }
+
+  function importDirectUrl() {
+    const trimmed = imageUrl.trim();
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== 'https:' || url.username || url.password || url.href.length > 4096) {
+        throw new Error('Enter an HTTPS image URL.');
+      }
+      const asset: Asset = {
+        id: stableUrlId(url.href),
+        title: (url.pathname.split('/').filter(Boolean).pop() || url.hostname).slice(0, 500),
+        fullUrl: url.href,
+        thumbnailUrl: url.href,
+        source: 'Direct URL',
+        sourceUrl: url.href,
+      };
+      select(asset);
+      setImageUrl('');
+      setDirectError('');
+    } catch (error) {
+      setDirectError(error instanceof Error && error.message === 'Enter an HTTPS image URL.'
+        ? error.message : 'Enter a valid HTTPS image URL.');
+    }
+  }
+
   const favorite = !!preview && library.favorites.some(row => row.asset.id === preview.id);
   async function toggleFavorite() {
     if (!preview) return;
     setSaving(true);
     try {
-      await request('api/library/favorite', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({asset:preview,favorite:!favorite}) });
+      await request('api/library/favorite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asset: preview, favorite: !favorite }) });
       refresh();
     } catch (error) { setLibraryError((error as Error).message); }
     finally { setSaving(false); }
   }
+
   const assets = tab === 'Search' ? results : library[tab === 'Favorites' ? 'favorites' : 'recent'].map(row => row.asset);
-  return <>
-    <div className="panel-heading"><h2>Image library</h2></div>
-    <form onSubmit={event => { event.preventDefault(); void search(); }}>
-      <label htmlFor="image-query">Search Wikimedia Commons</label>
-      <div className="input-row"><input id="image-query" value={query} maxLength={120} onChange={event => setQuery(event.target.value)} placeholder="Temples, family, mountains…" /><button disabled={busy || query.trim().length < 2}>{busy ? 'Searching…' : 'Search'}</button></div>
+  const canLoadMore = !!nextCursor && hasMore && !!searchContext &&
+    query.trim() === searchContext.query && provider === searchContext.provider;
+  const contextIsCurrent = !!searchContext && query.trim() === searchContext.query && provider === searchContext.provider;
+  const googleImagesUrl = query.trim().length >= 2
+    ? 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(query.trim())
+    : '';
+  const sourceSummary = Object.entries(progress).map(([name, state]) => {
+    const label = name === 'commons' ? 'Commons' : 'Openverse';
+    if (state?.state === 'loading') return label + ' searching';
+    if (state?.state === 'error') return label + ' unavailable';
+    return label + ' ' + (state?.count ?? 0) + ' new';
+  }).join(' · ');
+
+  return <section className="image-library" aria-labelledby="image-library-title">
+    <div className="panel-heading image-library__heading"><h2 id="image-library-title">Image library</h2></div>
+    <form className="image-library__search" onSubmit={event => { event.preventDefault(); void runSearch(false); }}>
+      <label className="image-library__label" htmlFor="image-query">Search images</label>
+      <div className="image-library__search-row">
+        <input id="image-query" value={query} maxLength={120} onChange={event => {
+          const next = event.target.value;
+          setQuery(next);
+          if (busy && next.trim() !== searchContext?.query) discardActiveSearch();
+        }} placeholder="Temples, family, mountains…" />
+        <select aria-label="Image sources" value={provider} onChange={event => {
+          const next = event.target.value as SearchProvider;
+          setProvider(next);
+          if (busy && next !== searchContext?.provider) discardActiveSearch();
+        }}>
+          <option value="all">All sources</option>
+          <option value="openverse">Openverse</option>
+          <option value="commons">Wikimedia Commons</option>
+        </select>
+        <button disabled={query.trim().length < 2}>{busy ? 'Search again' : 'Search'}</button>
+      </div>
     </form>
+
+    <div className="image-library__discovery">
+      {googleImagesUrl && <a href={googleImagesUrl} target="_blank" rel="noreferrer">Open Google Images ↗</a>}
+      {googleImagesUrl && <span aria-hidden="true">·</span>}
+      <span>Results include reuse licenses; check each image’s attribution.</span>
+    </div>
+
+    <form className="image-library__import" onSubmit={event => { event.preventDefault(); importDirectUrl(); }}>
+      <label className="image-library__label" htmlFor="image-url">Use an image URL</label>
+      <div className="image-library__import-row">
+        <input id="image-url" type="url" inputMode="url" value={imageUrl} maxLength={4096} onChange={event => setImageUrl(event.target.value)} placeholder="https://…" />
+        <button className="secondary-button" disabled={!imageUrl.trim()}>Preview URL</button>
+      </div>
+      {directError && <p className="error-message" role="alert">{directError}</p>}
+    </form>
+
     <div className="library-tabs" role="tablist" aria-label="Image library">
-      {(['Search','Favorites','Recent'] as const).map(name => <button key={name} role="tab" aria-selected={tab===name} onClick={() => setTab(name)}>{name}</button>)}
+      {(['Search', 'Favorites', 'Recent'] as const).map(name => <button key={name} role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{name}</button>)}
     </div>
     {searchError && <p className="error-message" role="alert">{searchError}</p>}
     {libraryError && <p className="error-message" role="alert">{libraryError} <button onClick={refresh}>Retry saved assets</button></p>}
     {preview && <button className="favorite-button" disabled={saving} onClick={() => void toggleFavorite()}>{favorite ? 'Unfavorite Preview' : 'Favorite Preview'}</button>}
-    <div className="asset-grid">
-      {assets.map(asset => <article key={asset.id}><button className="asset-card" onClick={() => select(asset)} aria-label={`Preview ${asset.title}`}><AssetImage asset={asset} thumbnail /><span>{asset.title}</span></button><Attribution asset={asset}/></article>)}
+
+    <div className="image-library__result-status" aria-live="polite">
+      {busy ? <span>{loadingMore ? 'Loading more images…' : 'Searching sources…'} {sourceSummary}</span>
+        : sourceSummary && contextIsCurrent && tab === 'Search' ? <span>{sourceSummary}</span>
+          : searchContext && !contextIsCurrent && results.length > 0 && tab === 'Search'
+            ? <span>Showing results for “{searchContext.query}”. Search again to use these settings.</span>
+            : null}
+      {busy && <button type="button" className="image-library__cancel" onClick={cancelSearch}>Cancel</button>}
     </div>
-    {!busy && !assets.length && <p className="muted-note">{tab === 'Search' ? searched ? 'No images found. Try another search.' : 'Search, select a graphic, then press TAKE.' : `No ${tab.toLowerCase()} yet.`}</p>}
-    <button className="secondary-button" onClick={() => select(TEST_ASSET)}>Load built-in test graphic</button>
-  </>;
+
+    <div className="asset-grid">
+      {assets.map(asset => <article className="image-library__card" key={asset.id}>
+        <button className="asset-card" onClick={() => select(asset)} aria-label={'Preview ' + asset.title}>
+          <AssetImage asset={asset} thumbnail />
+          <span>{asset.title}</span>
+        </button>
+        <details className="image-library__attribution">
+          <summary>Source and license</summary>
+          <Attribution asset={asset} />
+        </details>
+      </article>)}
+    </div>
+    {canLoadMore && tab === 'Search' && <button className="secondary-button image-library__more" disabled={busy} onClick={() => void runSearch(true)}>Load more images</button>}
+    {!busy && !assets.length && <p className="muted-note">{tab === 'Search' ? searched ? 'No images found. Try another search.' : 'Search and preview an image, then TAKE it to air.' : 'No ' + tab.toLowerCase() + ' yet.'}</p>}
+    <button className="secondary-button image-library__test" onClick={() => select(TEST_ASSET)}>Load built-in test graphic</button>
+  </section>;
+}
+
+function mergeAssets(existing: Asset[], incoming: Asset[]): Asset[] {
+  const output = [...existing];
+  const seen = new Set<string>();
+  output.forEach(asset => assetKeys(asset).forEach(key => seen.add(key)));
+  incoming.forEach(asset => {
+    const keys = assetKeys(asset);
+    if (keys.some(key => seen.has(key))) return;
+    keys.forEach(key => seen.add(key));
+    output.push(asset);
+  });
+  return output;
+}
+
+function assetKeys(asset: Asset): string[] {
+  const keys = ['id:' + asset.id];
+  for (const value of [asset.fullUrl, asset.thumbnailUrl]) {
+    if (!value) continue;
+    try {
+      const url = new URL(value);
+      url.hash = '';
+      for (const key of Array.from(url.searchParams.keys())) {
+        if (key.toLocaleLowerCase().startsWith('utm_')) url.searchParams.delete(key);
+      }
+      keys.push('url:' + url.toString());
+    } catch { keys.push('url:' + value); }
+  }
+  return keys;
+}
+
+function stableUrlId(value: string): string {
+  let left = 2166136261;
+  let right = 2246822519;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    left = Math.imul(left ^ code, 16777619) >>> 0;
+    right = Math.imul(right ^ (code + 0x9e), 3266489917) >>> 0;
+  }
+  return 'direct:' + left.toString(16).padStart(8, '0') + right.toString(16).padStart(8, '0');
 }

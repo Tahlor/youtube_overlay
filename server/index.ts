@@ -8,7 +8,7 @@ import { isVideoTime } from '../src/shared/playback.js';
 import { normalizeAsset } from '../src/shared/asset.js';
 import { ProgramStore } from './programState.js';
 import { LibraryStore } from './library.js';
-import { WikimediaProvider } from './imageProvider.js';
+import { createImageSearchRouter } from './imageSearch.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -16,7 +16,6 @@ const basePath = normalizeBasePath(process.env.BASE_PATH ?? '');
 const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { path: `${basePath}/socket.io`, maxHttpBufferSize: 32000 });
-const provider = new WikimediaProvider();
 let library: LibraryStore | null = null;
 let persistenceError = false;
 try { library = new LibraryStore(process.env.DATA_PATH ?? path.resolve('data/overlay.sqlite')); }
@@ -36,26 +35,7 @@ app.get(`${basePath}/api/healthz`, (_req, res) => {
   res.json({ ok: true, revision: program.getState().revision, persistence: library && !persistenceError ? 'ok' : 'unavailable', build });
 });
 
-// Bound cache and concurrency so provider outages cannot hold up core controls.
-const searchCache = new Map<string, { until: number; assets: Awaited<ReturnType<WikimediaProvider['search']>> }>();
-let searches = 0;
-app.get(`${basePath}/api/images/search`, async (req,res) => {
-  const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-  if (query.length < 2 || query.length > 120) { res.status(400).json({ error: 'Enter 2–120 characters to search.' }); return; }
-  const key = query.toLowerCase();
-  const cached = searchCache.get(key);
-  if (cached && cached.until > Date.now()) { res.json({ assets: cached.assets }); return; }
-  if (searches >= 4) { res.status(429).json({ error: 'Image search is busy. Try again shortly.' }); return; }
-  searches++;
-  try {
-    const assets = await provider.search(query);
-    if (searchCache.size >= 50) searchCache.delete(searchCache.keys().next().value!);
-    searchCache.set(key, { until: Date.now() + 300000, assets });
-    res.json({ assets });
-  } catch {
-    res.status(502).json({ error: 'Image search is unavailable. Try again; Preview, TAKE and LIVE still work.' });
-  } finally { searches--; }
-});
+app.use(`${basePath}/api/images`, createImageSearchRouter());
 app.get(`${basePath}/api/library`, (_req,res) => {
   try {
     if (!library) throw new Error();
@@ -134,8 +114,8 @@ io.on('connection', socket => {
       return program.setVideo(payload.videoId);
     });
   });
-  socket.on('program:take', (payload: { asset?: unknown }, ack?: unknown) => {
-    runCommand(ack, () => program.take(normalizeAsset(payload?.asset)), true);
+  socket.on('program:take', (payload: { asset?: unknown; presentation?: unknown }, ack?: unknown) => {
+    runCommand(ack, () => program.take(normalizeAsset(payload?.asset), payload?.presentation), true);
   });
   socket.on('program:live', (ack?: unknown) => runCommand(ack, () => program.goLive()));
 });
