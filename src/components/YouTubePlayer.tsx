@@ -87,7 +87,11 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
     const position = playbackPosition(next, Date.now() + offset);
     // Pause before and after seeking, including a newly cued player.
     if (next.status === 'paused') target.pauseVideo();
-    if (position !== null) target.seekTo(Math.min(position, target.getDuration() || position), true);
+    if (position !== null) {
+      const dur = target.getDuration();
+      const seekTarget = (dur && isVideoTime(dur) && position >= dur - 3) ? dur : Math.min(position, dur || position);
+      target.seekTo(seekTarget, true);
+    }
     if (next.status === 'paused') target.pauseVideo(); else target.playVideo();
   }
 
@@ -182,6 +186,18 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
   const position = timeline?.currentTime ?? playbackPosition(playback, Date.now() + clockOffset) ?? 0;
   const disabled = !connected || pending;
   const canSeek = !disabled && duration > 0;
+  const currentPosition = seekDraft ?? position;
+  const isLiveAtHead = duration > 0 && Math.abs(duration - currentPosition) <= 5 && playback.status === 'playing';
+
+  function seekToLive() {
+    const dur = player.current?.getDuration() ?? duration;
+    if (player.current && readyRef.current) {
+      if (dur && isVideoTime(dur)) player.current.seekTo(dur, true);
+      player.current.playVideo();
+    }
+    void control('live', { position: dur && isVideoTime(dur) ? dur : undefined });
+  }
+
   function commitSeek() {
     const position = seekDraftRef.current;
     if (position !== null) {
@@ -204,6 +220,7 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
   const playerControls = <div className="player-controls">
     <span role="status">{status}</span>
     <button onClick={startVideo}>Start video</button>
+    <button onClick={seekToLive} disabled={disabled}>Go to Live</button>
     <button onClick={() => setRetry(value => value + 1)}>Retry player</button>
     <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noreferrer">Open YouTube</a>
   </div>;
@@ -236,12 +253,21 @@ export function YouTubePlayer({ videoId, title, muted = false, className = '', p
     {!audience && <>
     <div className="transport-controls" aria-label="Shared video playback">
       <div className="transport-buttons">
-        <button disabled={!canSeek} onClick={() => void control('skip', { seconds: -10 })} aria-label="Rewind 10 seconds">⏪ −10s</button>
+        <button disabled={!canSeek} onClick={() => void control('skip', { seconds: -10 })} aria-label="Rewind 10 seconds" title="Rewind 10 seconds">⏪ −10s</button>
         <button className="play-pause" disabled={disabled || (playback.status === 'playing' && !duration)} onClick={() => void control(playback.status === 'playing' ? 'pause' : 'play')}>
           {playback.status === 'paused' ? '▶ Play' : 'Ⅱ Pause'}
         </button>
-        <button disabled={!canSeek} onClick={() => void control('skip', { seconds: 10 })} aria-label="Fast forward 10 seconds">+10s ⏩</button>
-        <span className="playback-time">{formatTime(seekDraft ?? position)} / {duration ? formatTime(duration) : '—'}</span>
+        <button disabled={!canSeek} onClick={() => void control('skip', { seconds: 10 })} aria-label="Fast forward 10 seconds" title="Fast forward 10 seconds">+10s ⏩</button>
+        <button
+          className={`live-edge-btn ${isLiveAtHead ? 'is-live' : 'is-behind'}`}
+          disabled={disabled}
+          onClick={seekToLive}
+          aria-label={isLiveAtHead ? "Playing live" : "Seek to live moment"}
+          title={isLiveAtHead ? "Currently at live moment" : "Seek to the live moment"}
+        >
+          <span className="live-dot" aria-hidden="true" /> Live
+        </button>
+        <span className="playback-time">{formatTime(currentPosition)} / {duration ? formatTime(duration) : '—'}</span>
       </div>
       <input className="seek-slider" type="range" aria-label="Seek video" aria-valuetext={formatTime(seekDraft ?? position)} min="0" max={duration || 1} step="1" value={Math.min(duration || 1, seekDraft ?? position)} disabled={!canSeek}
         onChange={event => { seekDraftRef.current = Number(event.target.value); setSeekDraft(seekDraftRef.current); }} onPointerUp={commitSeek} onPointerCancel={() => { seekDraftRef.current = null; setSeekDraft(null); }}

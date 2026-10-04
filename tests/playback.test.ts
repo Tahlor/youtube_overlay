@@ -62,3 +62,23 @@ test('time entry accepts seconds and timestamps, rejecting ambiguous or impossib
   for (const bad of ['', '1:60', '1:60:00', '-1', 'Infinity', '1:2:3:4', 'one', '9999999999']) assert.equal(parseTime(bad), null);
   assert.equal(formatTime(90), '1:30'); assert.equal(formatTime(3723), '1:02:03');
 });
+
+test('live action seeks to live head and resumes playing', () => {
+  const store = new ProgramStore();
+  store.setVideo(videoId);
+  control(store, 'pause', { position: 120 });
+  assert.equal(store.getState().playback.status, 'paused');
+  assert.equal(store.getState().playback.position, 120);
+
+  // Live action with duration seeks to live edge and switches status to playing
+  const liveState = control(store, 'live', { position: 500 }, undefined, 500);
+  assert.equal(liveState.playback.status, 'playing');
+  assert.equal(liveState.playback.position, 500);
+
+  // Live action with duration parameter when position omitted defaults to duration
+  control(store, 'pause', { position: 100 });
+  const liveHead = control(store, 'live', {}, undefined, 750);
+  assert.equal(liveHead.playback.status, 'playing');
+  assert.equal(liveHead.playback.position, 750);
+});
+

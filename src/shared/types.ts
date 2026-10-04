@@ -40,7 +40,7 @@ export interface PlaybackState {
 export interface PlaybackCommand {
   videoId: string;
   playbackRevision: number;
-  action: "play" | "pause" | "seek" | "skip";
+  action: "play" | "pause" | "seek" | "skip" | "live";
   position?: number;
   seconds?: number;
 }

@@ -72,9 +72,34 @@ Only after M0–M3 are dependable:
 
 ## Backlog — intentionally not on the critical path
 
-### Caption context and AI-assisted search
+### Output Recording
+Tracking: #16.
+- Evaluate client-side recording via `MediaRecorder` / `canvas.captureStream()` on `/output`.
+- Server-side headless compositing (Chromium/Puppeteer or FFmpeg) for production MP4/WebM archives.
 
-Tracking: #5.
+### Freeform Layout & Arbitrary Positioning
+Tracking: #17.
+- Allow users to freely drag and resize video and image boxes beyond preset corners.
+- Coordinate-based `PresentationSettings` with snap-to-edge guidelines.
+
+### Centralized Controls, Shortcuts & Tooltips
+Tracking: #18.
+- Single unified master switcher dock for all primary switching actions.
+- Keyboard shortcuts (`Enter` to TAKE, `Esc` for Back to video, `Space` for play/pause, `L` for live head).
+- Contextual tooltips explaining operations and shortcut accelerators.
+
+### Image Intake & Asset Library Expansion
+Tracking: #19, #20.
+- Automatic library persistence for custom entered image URLs (#19).
+- Clipboard image pasting (`Ctrl+V`) directly into the library and preview (#20).
+
+### Stream Synchronization Hardening & Force Sync
+Tracking: #21.
+- Active drift telemetry comparing Director monitor and TV output.
+- Auto-recovery loop and dedicated "Force Sync" button on console.
+
+### Caption context and AI-assisted search
+Tracking: #5, #22.
 
 Architectural seam only until the base product is proven:
 
@@ -82,10 +107,9 @@ Architectural seam only until the base product is proven:
 ContextProvider -> SearchSuggestionProvider -> ImageProvider
 ```
 
-Potential transcript inputs (caption bridge, speech-to-text, etc.) should be evaluated later. AI may suggest searches but should never TAKE automatically.
+First step: Technical spike on YouTube live stream caption extraction feasibility (API/TimedText vs. headless demuxing vs. real-time audio STT like Whisper/Gemini). AI may suggest searches but should never TAKE automatically.
 
 ### Additional controls/layouts
-
 Tracking: #6.
 
 - Phone emergency remote.
@@ -95,7 +119,6 @@ Tracking: #6.
 - More Program layouts.
 
 ### True composited/restreamed output
-
 Tracking: #7.
 
 Do not build a media pipeline unless browser-based Program output proves insufficient. If revisited, evaluate the requirement first and choose the media technology then rather than constraining M0 around OBS/ffmpeg/WebRTC/HLS prematurely.

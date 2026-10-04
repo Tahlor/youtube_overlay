@@ -55,17 +55,17 @@ export class ProgramStore {
   controlPlayback(value: PlaybackCommand, observedPosition?: number, duration?: number): ProgramState {
     if (!value || !this.state.videoId || value.videoId !== this.state.videoId) throw new Error("Choose a video before controlling playback.");
     if (value.playbackRevision !== this.state.playback.revision) throw new Error("Playback changed. Try the control again.");
-    if (!['play', 'pause', 'seek', 'skip'].includes(value.action)) throw new Error("Invalid playback action.");
+    if (!['play', 'pause', 'seek', 'skip', 'live'].includes(value.action)) throw new Error("Invalid playback action.");
     if (value.position !== undefined && !isVideoTime(value.position)) throw new Error("Invalid playback position.");
     if (value.action === 'seek' && !isVideoTime(value.position)) throw new Error("A valid seek position is required.");
     if (value.action === 'skip' && (typeof value.seconds !== 'number' || !Number.isFinite(value.seconds) || Math.abs(value.seconds) > 3600)) throw new Error("Skip must be between −3600 and 3600 seconds.");
     const now = Date.now();
     const current = observedPosition ?? playbackPosition(this.state.playback, now) ?? value.position;
     if ((value.action === 'pause' || value.action === 'skip') && current === undefined) throw new Error("Wait for the player to load, then try again.");
-    let position = value.action === 'seek' ? value.position! : value.action === 'skip' ? current! + value.seconds! : current ?? null;
+    let position = value.action === 'seek' ? value.position! : value.action === 'skip' ? current! + value.seconds! : value.action === 'live' ? (value.position ?? (duration && duration > 0 ? duration : current) ?? null) : current ?? null;
     if (position !== null) position = Math.max(0, Math.min(duration && duration > 0 ? duration : MAX_VIDEO_SECONDS, position));
     this.state = { ...this.state, revision: this.state.revision + 1, playback: {
-      status: value.action === 'play' ? 'playing' : value.action === 'pause' ? 'paused' : this.state.playback.status,
+      status: value.action === 'pause' ? 'paused' : (value.action === 'play' || value.action === 'live') ? 'playing' : this.state.playback.status,
       position, updatedAt: now, revision: this.state.playback.revision + 1,
     } };
     return this.getState();

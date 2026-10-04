@@ -143,9 +143,11 @@
 .compact-director .console-monitor .youtube-player { flex: 0 1 auto; min-height: 0; }
 .compact-director .console-monitor .youtube-frame { flex: none; aspect-ratio: 16 / 9; border-radius: 8px; }
 .compact-director .console-monitor .transport-controls { flex: none; padding: 6px; border-radius: 0 0 7px 7px; }
-.compact-director .console-monitor .transport-buttons { gap: 5px; flex-wrap: nowrap; }
+.compact-director .console-monitor .transport-buttons { gap: 4px; flex-wrap: wrap; }
 .compact-director .console-monitor .transport-buttons button { min-height: 31px; padding: 5px 7px; border-radius: 7px; font-size: .69rem; white-space: nowrap; }
-.compact-director .console-monitor .transport-buttons .play-pause { min-width: 72px; }
+.compact-director .console-monitor .transport-buttons .play-pause { min-width: 68px; }
+.compact-director .console-monitor .transport-buttons .live-edge-btn { min-width: 52px; padding: 5px 6px; font-weight: 700; }
+.compact-director .console-monitor .transport-buttons .live-edge-btn .live-dot { width: 6px; height: 6px; margin: 0 3px 0 0; }
 .compact-director .console-monitor .playback-time { flex: 0 0 auto; margin-left: auto; font-size: .68rem; }
 .compact-director .console-monitor .seek-slider { min-height: 19px; margin: 4px 0; }
 .compact-director .console-monitor .seek-form { gap: 5px; }
