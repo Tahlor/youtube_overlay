@@ -154,3 +154,25 @@ h2 { margin-bottom: 0; font-size: 1.15rem; }
   .output-shell.graphic-mode .player-controls { padding:4px; }
   .output-shell.graphic-mode .player-controls span { flex-basis:100%; }
 }
+
+.transport-controls { flex:none; padding:10px; background:#101b2c; border-bottom:1px solid #263750; }
+.transport-buttons { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.transport-controls button { min-height:40px; padding:8px 12px; border:1px solid #41516a; border-radius:8px; background:#15273d; color:#e2e8f0; font-weight:700; }
+.transport-controls .play-pause { background:#2563eb; min-width:100px; }
+.playback-time { font-variant-numeric:tabular-nums; font-size:.85rem; margin-left:auto; white-space:nowrap; }
+.seek-slider { display:block; width:100%; margin:12px 0; accent-color:#60a5fa; cursor:pointer; min-height:28px; }
+.seek-slider:disabled { cursor:not-allowed; }
+.seek-form { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.seek-form input { width:155px; min-width:0; background:#070f1c; color:white; border:1px solid #41516a; border-radius:8px; padding:9px; }
+.seek-form span, .transport-note { color:#a6b8d0; font-size:.78rem; }
+.transport-note { margin:8px 0 0; }
+button:focus-visible, a:focus-visible, .seek-slider:focus-visible { outline:2px solid #93c5fd; outline-offset:3px; }
+.output-shell.graphic-mode .transport-controls { padding:8px; }
+.output-shell.graphic-mode .transport-buttons { gap:5px; }
+.output-shell.graphic-mode .transport-buttons button { padding:8px; }
+@media (max-width:560px) {
+  .playback-time { width:100%; margin-left:0; }
+  .output-shell.graphic-mode .seek-form { display:none; }
+  .output-shell.graphic-mode .transport-controls { padding:5px 8px; }
+  .output-shell.graphic-mode .seek-slider { margin:3px 0; }
+}

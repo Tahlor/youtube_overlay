@@ -16,6 +16,7 @@ test("starts in a safe live state", () => {
     mode: "live",
     activeAsset: null,
     revision: 0,
+    playback: { status: "playing", position: null, updatedAt: 0, revision: 0 },
   });
 });
 

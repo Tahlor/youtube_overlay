@@ -10,7 +10,7 @@ import { YouTubePlayer } from "../components/YouTubePlayer";
 import { appPath } from "../basePath";
 
 export function Director() {
-  const { program, connected } = useProgram();
+  const { program, connected, clockOffset, outputPlayback } = useProgram();
   const [videoInput, setVideoInput] = useState("");
   const [preview, setPreview] = useState<Asset | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +75,11 @@ export function Director() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Monitor</p>
-              <h2>Live feed</h2>
+              <h2>Video & playback</h2>
             </div>
             <span className="muted-note">Director audio muted</span>
           </div>
-          <YouTubePlayer videoId={program.videoId} title="Director live monitor" muted />
+          <YouTubePlayer videoId={program.videoId} title="Director live monitor" muted playback={program.playback} connected={connected} clockOffset={clockOffset} outputPlayback={outputPlayback} />
         </article>
 
         <article className="panel program-status">

@@ -31,6 +31,11 @@ Only explicit commands change Program.
 - **SET VIDEO** — choose the YouTube stream/video.
 - **TAKE** — promote the selected Preview asset to Program.
 - **LIVE** — return Program to the live-video layout.
+- **PAUSE / PLAY** — pause or resume shared playback on the monitor and TV.
+- **REWIND / FAST FORWARD** — skip backward or forward ten seconds.
+- **SEEK** — choose a time with the scrubber or seconds, `mm:ss`, or `hh:mm:ss` entry. Seeking while paused preserves pause.
+
+Playback and layout are independent: TAKE and LIVE preserve playback. Shared playback commands and the paused position survive reconnect/reload/restart. Native YouTube transport interactions also send shared commands. The TV reports recent timing and player status to Director; command acknowledgement confirms server acceptance, while TV feedback indicates whether the player is running. Live seeking depends on the stream's DVR window. Browser autoplay restrictions may require pressing Start video on the TV.
 
 LIVE is the safety action and should remain obvious and available even if optional subsystems fail.
 

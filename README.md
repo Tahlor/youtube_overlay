@@ -19,12 +19,15 @@ See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for service, nginx, verification,
 1. Open `/director` on the directing computer.
 2. Open `/output` on the TV.
 3. Set the YouTube live URL/video.
+   Use **Pause / Play**, **−10s / +10s**, the seek bar, or the **Seek** time field to control both the monitor and TV. Time entry accepts seconds, `mm:ss`, or `hh:mm:ss`. Seeking while paused keeps both players paused.
 4. Search Wikimedia Commons or reuse Favorites/Recent; select an image into Preview.
 5. Selecting changes **Preview** only.
 6. Press **TAKE** to change Program.
 7. Press **LIVE** at any time to return Program to the live-video layout.
 
 The server owns canonical Program state. Preview remains local to the Director.
+
+**LIVE** restores the video layout and preserves the current playback position and pause. Native YouTube play/pause and scrubbing also update shared playback. The Director shows recent TV playback feedback; **Start video** on the TV handles browser autoplay restrictions. Live rewind/seek depends on YouTube DVR being enabled and the available recording window. Players share transport commands; buffering and YouTube keyframes can cause small timing differences.
 
 ## Current milestones
 
@@ -84,6 +87,8 @@ npm run check
 ```
 
 That command runs client/server TypeScript validation, unit tests, and a production build.
+
+Run `npm run test:playback` after building for the shared transport acceptance checks (pause, rewind, fast forward, pointer/keyboard scrubbing, timestamps, native controls, paused reload/restart, and TAKE/LIVE). This uses a simulated IFrame API to verify app behavior; `npm run test:browser` separately records real YouTube startup observations.
 
 ## Browser validation
 

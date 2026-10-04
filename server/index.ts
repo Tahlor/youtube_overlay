@@ -3,7 +3,8 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import express from 'express';
 import { Server } from 'socket.io';
-import type { CommandAck, ProgramState } from '../src/shared/types.js';
+import type { CommandAck, ProgramState, PlaybackCommand, PlaybackSample, OutputPlayback } from '../src/shared/types.js';
+import { isVideoTime } from '../src/shared/playback.js';
 import { normalizeAsset } from '../src/shared/asset.js';
 import { ProgramStore } from './programState.js';
 import { LibraryStore } from './library.js';
@@ -24,6 +25,8 @@ let program: ProgramStore;
 try { program = new ProgramStore(library?.readProgram()); }
 catch { program = new ProgramStore(); persistenceError = true; console.error('Saved Program unavailable; starting safely in LIVE.'); }
 let build: Record<string, unknown> = { commit: 'development' };
+let outputPlayback: (OutputPlayback & { socketId: string }) | null = null;
+let lastPlaybackSave = 0;
 try { build = JSON.parse(readFileSync(path.resolve('dist/build.json'), 'utf8')); } catch { /* dev */ }
 
 app.disable('x-powered-by');
@@ -84,8 +87,47 @@ app.use((error: { status?: number }, _req: express.Request, res: express.Respons
 });
 
 io.on('connection', socket => {
-  socket.emit('program:state', program.getState());
-  socket.on('program:get-state', () => socket.emit('program:state', program.getState()));
+  socket.emit('program:state', program.getState(), Date.now());
+  socket.on('program:get-state', () => {
+    socket.emit('program:state', program.getState(), Date.now());
+    socket.emit('playback:output', freshOutput());
+  });
+  socket.on('program:clock', (ack: unknown) => { if (typeof ack === 'function') ack(Date.now()); });
+  let lastReport = 0;
+  socket.on('playback:report', (sample: PlaybackSample) => {
+    const state = program.getState();
+    const now = Date.now();
+    if (now - lastReport < 500 || !sample || sample.videoId !== state.videoId || sample.playbackRevision !== state.playback.revision ||
+      !isVideoTime(sample.currentTime) || !isVideoTime(sample.duration) || ![-1, 0, 1, 2, 3, 5].includes(sample.playerState) ||
+      typeof sample.status !== 'string' || sample.status.length > 300) return;
+    lastReport = now;
+    outputPlayback = { ...sample, receivedAt: now, socketId: socket.id };
+    // Anchor a new stream only once the TV has actually begun playing.
+    if (state.playback.position === null && sample.playerState === 1 && sample.duration > 0) {
+      runCommand(undefined, () => program.controlPlayback({ videoId: sample.videoId, playbackRevision: sample.playbackRevision, action: 'seek', position: sample.currentTime }));
+    } else {
+      // Keep reconnects and restarts close to the TV's actual point, including buffering.
+      if (state.playback.position !== null && sample.duration > 0 && [0, 1, 2, 3].includes(sample.playerState) &&
+        (state.playback.status === 'paused' ? sample.playerState === 2 : sample.playerState !== 2)) {
+        const next = program.recordPosition(sample.currentTime);
+        if (now - lastPlaybackSave >= 5000) {
+          lastPlaybackSave = now;
+          try { library?.saveProgram(next); } catch { persistenceError = true; }
+        }
+      }
+      io.emit('playback:output', freshOutput());
+    }
+  });
+  socket.on('program:playback', (payload: PlaybackCommand, ack?: unknown) => {
+    runCommand(ack, () => {
+      const observed = freshOutput();
+      const position = observed && observed.duration > 0 && [0, 1, 2, 3].includes(observed.playerState) ? observed.currentTime + (observed.playerState === 1 ? (Date.now() - observed.receivedAt) / 1000 : 0) : undefined;
+      return program.controlPlayback(payload, position, observed?.duration);
+    });
+  });
+  socket.on('disconnect', () => {
+    if (outputPlayback?.socketId === socket.id) { outputPlayback = null; io.emit('playback:output', null); }
+  });
   socket.on('program:set-video', (payload: { videoId?: unknown }, ack?: unknown) => {
     runCommand(ack, () => {
       if (typeof payload?.videoId !== 'string') throw new Error('videoId must be a string.');
@@ -103,7 +145,7 @@ function runCommand(ack: unknown, command: () => ProgramState, taken = false) {
   try {
     const next = command();
     // Broadcast valid core state independently of optional persistence.
-    io.emit('program:state', next);
+    io.emit('program:state', next, Date.now());
     try {
       if (library) {
         library.saveProgram(next);
@@ -114,6 +156,12 @@ function runCommand(ack: unknown, command: () => ProgramState, taken = false) {
   } catch (error) { result = { ok: false, error: error instanceof Error ? error.message : 'Command failed.' }; }
   // Malformed acknowledgement payloads must never crash the server.
   if (typeof ack === 'function') ack(result);
+}
+function freshOutput(): OutputPlayback | null {
+  const state = program.getState();
+  if (!outputPlayback || outputPlayback.videoId !== state.videoId || outputPlayback.playbackRevision !== state.playback.revision || Date.now() - outputPlayback.receivedAt > 5000) return null;
+  const { socketId: _socketId, ...sample } = outputPlayback;
+  return sample;
 }
 function normalizeBasePath(value: string) {
   const trimmed = value.trim();

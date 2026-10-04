@@ -17,6 +17,36 @@ export interface ProgramState {
   mode: ProgramMode;
   activeAsset: Asset | null;
   revision: number;
+  playback: PlaybackState;
+}
+
+export interface PlaybackState {
+  status: "playing" | "paused";
+  // null lets YouTube choose the initial position (including a livestream's live edge).
+  position: number | null;
+  updatedAt: number;
+  revision: number;
+}
+
+export interface PlaybackCommand {
+  videoId: string;
+  playbackRevision: number;
+  action: "play" | "pause" | "seek" | "skip";
+  position?: number;
+  seconds?: number;
+}
+
+export interface PlaybackSample {
+  videoId: string;
+  playbackRevision: number;
+  currentTime: number;
+  duration: number;
+  playerState: number;
+  status: string;
+}
+
+export interface OutputPlayback extends PlaybackSample {
+  receivedAt: number;
 }
 
 export interface CommandAck {

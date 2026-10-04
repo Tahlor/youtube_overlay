@@ -65,6 +65,7 @@ export interface ProgramState {
   mode: ProgramMode;
   activeAsset: Asset | null;
   revision: number;
+  playback: { status: "playing" | "paused"; position: number | null; updatedAt: number; revision: number };
 }
 ```
 
@@ -78,7 +79,7 @@ The protocol should stay small.
 
 `program:state`
 
-Payload: complete `ProgramState`.
+Payload: complete `ProgramState`, followed by the current server timestamp for clock alignment.
 
 Clients do not need to replay event history; receiving the newest full state is sufficient.
 
@@ -108,6 +109,12 @@ No payload.
 
 Mutation commands support acknowledgements so the Director can show validation failures without guessing whether Program changed.
 
+`program:playback` accepts `{ videoId, playbackRevision, action: 'play' | 'pause' | 'seek' | 'skip', position?, seconds? }`. Video and playback revision checks reject stale commands. Pause/skip prefer fresh TV timing; absolute seeking uses the requested position. Skip targets clamp to zero and the latest known duration. Layout changes preserve the independent playback revision.
+
+`playback:report` carries bounded TV timing/status samples once per second. `playback:output` relays fresh samples to Director. Stale video/revision reports are ignored; a five-second age limit prevents old feedback from controlling the new video. The first playing TV report anchors a new stream; later samples update position without incrementing command revision, and checkpoints persist at most once every five seconds. A paused command is persisted immediately. `program:clock` acknowledges the server timestamp to estimate browser clock offset.
+
+Players apply new playback revisions through YouTube's play/pause/seek API. They suppress native event echoes during command application, then forward native play/pause and detected scrubbing as explicit commands. Delayed readiness applies the latest state. A null initial position allows YouTube to choose the starting live edge. No regular forced seeking is used; DVR limits, keyframes and buffering remain YouTube's responsibility.
+
 ## Client connection lifecycle
 
 The Socket.IO client is created with `autoConnect: false`.
@@ -125,7 +132,7 @@ This ordering is intentional. Starting the socket at module-import time can allo
 
 1. `mode === "live"` implies `activeAsset === null`.
 2. `mode === "graphic"` implies `activeAsset !== null`.
-3. Every accepted state mutation increments `revision` exactly once.
+3. Every accepted command increments `revision` exactly once; timing checkpoints update position without a command revision.
 4. Invalid commands do not mutate state.
 5. A newly connected client receives the current complete state.
 6. Any connected client can explicitly resync to the current complete state without mutating Program.

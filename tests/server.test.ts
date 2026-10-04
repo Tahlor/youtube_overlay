@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { io, type Socket } from 'socket.io-client';
-import type { CommandAck, ProgramState } from '../src/shared/types.js';
+import type { CommandAck, ProgramState, PlaybackCommand, OutputPlayback } from '../src/shared/types.js';
 const prefix='/youtube_overlay';
 async function start(data: string) {
   const child=spawn(process.execPath,['--import','tsx','server/index.ts'],{env:{...process.env,PORT:'0',HOST:'127.0.0.1',BASE_PATH:prefix,DATA_PATH:data},stdio:['ignore','pipe','pipe']});
@@ -60,4 +60,44 @@ test('SQLite startup failure cannot disable LIVE or TAKE', {timeout:15000},async
     assert.equal((await command(socket,'program:live')).ok,true);
     const health=await (await fetch(`${running.url}${prefix}/api/healthz`)).json();assert.equal(health.ok,true);assert.equal(health.persistence,'unavailable');
   } finally {socket?.disconnect();await stop(running.child);rmSync(dir,{recursive:true,force:true});}
+});
+
+test('shared playback socket commands, TV timing, stale rejection and paused restart recovery', {timeout:30000}, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'overlay-playback-server-'));
+  let running: Awaited<ReturnType<typeof start>> | undefined; const clients: Socket[] = [];
+  try {
+    running = await start(path.join(dir, 'db.sqlite'));
+    const director = await connect(running.url), output = await connect(running.url); clients.push(director.socket, output.socket);
+    const videoId = 'aqz-KE-bpKQ';
+    await command(director.socket, 'program:set-video', { videoId });
+    const control = async (action: PlaybackCommand['action'], values: { position?: number; seconds?: number } = {}) => {
+      const current = await state(director.socket);
+      return command(director.socket, 'program:playback', { videoId, playbackRevision: current.playback.revision, action, ...values });
+    };
+    assert.equal((await control('pause')).ok, false);
+    assert.equal((await control('seek', { position: 300 })).ok, true);
+    const current = await state(output.socket);
+    const report = new Promise<OutputPlayback>(resolve => director.socket.once('playback:output', resolve));
+    output.socket.emit('playback:report', { videoId, playbackRevision: current.playback.revision, currentTime: 270, duration: 600, playerState: 1, status: 'Playing' });
+    assert.equal((await report).currentTime, 270);
+    assert.equal((await control('pause', { position: 100 })).ok, true);
+    const paused = await state(output.socket);
+    assert.equal(paused.playback.status, 'paused'); assert.ok(paused.playback.position >= 270 && paused.playback.position < 272);
+    assert.equal((await control('seek', { position: 555 })).ok, true);
+    assert.equal((await control('skip', { seconds: -10 })).ok, true);
+    let next = await state(output.socket); assert.equal(next.playback.position, 545); assert.equal(next.playback.status, 'paused');
+    assert.equal((await command(director.socket, 'program:playback', { videoId, playbackRevision: current.playback.revision, action: 'seek', position: 1 })).ok, false);
+    for (const payload of [null, {}, { videoId, action: 'seek', position: -5 }]) assert.equal((await command(director.socket, 'program:playback', payload)).ok, false);
+    for (const payload of [null, {}, { videoId, playbackRevision: next.playback.revision, currentTime: -1, duration: 600, playerState: 1, status: 'bad' }]) output.socket.emit('playback:report', payload);
+    assert.deepEqual(await state(output.socket), next);
+    await command(director.socket, 'program:take', { asset: { id: 'graphic', title: 'Graphic', fullUrl: '/test-graphic.svg' } });
+    await command(director.socket, 'program:live');
+    assert.deepEqual((await state(output.socket)).playback, next.playback);
+    const saved = await state(output.socket);
+    clients.forEach(client => client.disconnect()); await stop(running.child); running = await start(path.join(dir, 'db.sqlite'));
+    const restored = await connect(running.url); clients.push(restored.socket);
+    assert.deepEqual(restored.state, saved);
+  } finally {
+    clients.forEach(client => client.disconnect()); if (running?.child.exitCode === null) await stop(running.child); rmSync(dir, { recursive: true, force: true });
+  }
 });

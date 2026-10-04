@@ -129,7 +129,8 @@ try {
   const recoveryContext=await browser.newContext();
   await recoveryContext.addInitScript(()=>{window.YT={Player:class {
     constructor(frame,{events}){this.events=events;setTimeout(()=>{events.onReady({target:this});events.onAutoplayBlocked({target:this});},50);}
-    mute(){} unMute(){} playVideo(){if(this.started)this.events.onStateChange({data:1,target:this});this.started=true;} destroy(){}
+    mute(){} unMute(){} playVideo(){if(this.started)this.events.onStateChange({data:1,target:this});this.started=true;}
+    pauseVideo(){this.events.onStateChange({data:2,target:this});} seekTo(){} getCurrentTime(){return 0;} getDuration(){return 0;} getPlayerState(){return this.started?1:-1;} destroy(){}
   }};});
   const recovery=await recoveryContext.newPage();await recovery.goto(`${base}/output`);
   await recovery.getByText('Autoplay blocked. Press Start video to play with sound.').waitFor();
