@@ -1,6 +1,4 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import type { Server, Socket } from 'socket.io';
 import type { CameraSource, InputSource, ProgramState } from '../src/shared/types.js';
 import { CAMERA_SOURCES, effectiveAudioSource, isCameraSource } from '../src/shared/input.js';
@@ -16,6 +14,7 @@ interface SignalingProgram {
 }
 
 export interface InputSignalingManager {
+  claimDirector(socketId: string, identity: string): boolean;
   isAvailable(source: CameraSource): boolean;
   isDirector(socketId: string): boolean;
   getAvailability(): Record<CameraSource, boolean>;
@@ -24,7 +23,6 @@ export interface InputSignalingManager {
 
 interface Options {
   basePath: string;
-  directorKey: string | null;
   onSelectedCameraDisconnected(source: CameraSource): void;
 }
 
@@ -33,16 +31,23 @@ const inviteTokens = Object.fromEntries(PHONE_SOURCES.map(source => [source, ran
 
 /**
  * Installs the private phone invite, broadcaster, watcher, and WebRTC relay events.
- * Invite tokens live only in this process and are returned only to a claimed Director.
+ * Director sockets are claimed only by the SSO-authenticated HTTP boundary in
+ * server/index.ts. Public sockets cannot self-promote by emitting an event.
  */
 export function attachInputSignaling(io: Server, program: SignalingProgram, options: Options): InputSignalingManager {
   const broadcasters = new Map<CameraSource, BroadcasterRecord>();
   const watchers = new Map<CameraSource, Map<string, WatcherRecord>>();
   const broadcasterSources = new Map<string, Set<CameraSource>>();
   const watcherSources = new Map<string, Map<CameraSource, Set<WatchKind>>>();
-  const directors = new Set<string>();
+  const directors = new Map<string, string>();
 
   const manager: InputSignalingManager = {
+    claimDirector: (socketId, identity) => {
+      if (!identity || !io.sockets.sockets.has(socketId)) return false;
+      directors.set(socketId, identity);
+      io.to(socketId).emit('input:availability', manager.getAvailability());
+      return true;
+    },
     isAvailable: source => broadcasters.has(source),
     isDirector: socketId => directors.has(socketId),
     getAvailability: () => Object.fromEntries(CAMERA_SOURCES.map(source => [source, broadcasters.has(source)])) as Record<CameraSource, boolean>,
@@ -132,21 +137,9 @@ export function attachInputSignaling(io: Server, program: SignalingProgram, opti
   io.on('connection', (socket: InputSocket) => {
     socket.emit('input:availability', manager.getAvailability());
 
-    socket.on('input:director', (payloadOrAck?: { key?: unknown } | Acknowledge, ack?: unknown) => {
-      const callback = typeof payloadOrAck === 'function' ? payloadOrAck : ack;
-      const candidate = typeof payloadOrAck === 'object' ? payloadOrAck?.key : undefined;
-      if (options.directorKey && !matchesToken(candidate, options.directorKey)) {
-        reject(socket, callback, 'Director access key required. Open your private Director link or enter the key.');
-        return;
-      }
-      directors.add(socket.id);
-      if (typeof callback === 'function') (callback as Acknowledge)({ ok: true });
-      socket.emit('input:availability', manager.getAvailability());
-    });
-
     socket.on('input:invites', (ack?: unknown) => {
       if (!directors.has(socket.id)) {
-        reject(socket, ack, 'Claim the Director connection before requesting phone links.');
+        reject(socket, ack, 'Sign in to Director before requesting phone links.');
         return;
       }
       const links = Object.fromEntries(PHONE_SOURCES.map(source => [
@@ -177,7 +170,7 @@ export function attachInputSignaling(io: Server, program: SignalingProgram, opti
         return;
       }
       if (!directors.has(socket.id)) {
-        reject(socket, ack, 'Claim the Director connection before starting its camera.', 'director');
+        reject(socket, ack, 'Sign in to Director before starting its camera.', 'director');
         return;
       }
       if (!claimBroadcaster(socket, 'director', ack)) return;
@@ -268,19 +261,6 @@ export function attachInputSignaling(io: Server, program: SignalingProgram, opti
   }
 
   return manager;
-}
-
-export function directorAccessKey(dataPath: string): string | null {
-  const configured = process.env.DIRECTOR_ACCESS_KEY;
-  if (configured) return configured;
-  if (process.env.NODE_ENV !== 'production') return null;
-  const filename = path.join(path.dirname(dataPath), 'director-access-key');
-  mkdirSync(path.dirname(filename), { recursive: true });
-  try { writeFileSync(filename, randomBytes(32).toString('base64url'), { flag: 'wx', mode: 0o600 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-  const key = readFileSync(filename, 'utf8').trim();
-  if (!key) throw new Error('Director access key file is empty.');
-  return key;
 }
 
 function matchesToken(candidate: unknown, expectedToken: string): boolean {
