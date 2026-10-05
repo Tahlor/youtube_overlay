@@ -1,0 +1,96 @@
+.image-library__upload-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 7px 0 8px;
+}
+.image-library__upload-actions .secondary-button { flex: none; }
+.image-library__upload-actions .muted-note { margin: 0; }
+.image-library__upload-actions .upload-notice { color: #86efac; font-size: .72rem; font-weight: 650; }
+
+@media (max-width: 760px) {
+  /* Once the operator scrolls into the show controls, keep the two actions that
+     can affect the TV reachable even while browsing or using the soft keyboard. */
+  .compact-director .on-air-strip {
+    position: sticky;
+    top: 0;
+    z-index: 80;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .45);
+  }
+
+  .compact-director .master-controls {
+    width: 100%;
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+  .compact-director .staged-status-pill {
+    grid-column: 1 / -1;
+    max-width: none;
+    min-height: 44px;
+    padding: 6px 9px;
+  }
+  .compact-director .take-button,
+  .compact-director .live-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    justify-content: center;
+    font-size: .82rem;
+  }
+
+  /* Layout/sync are still available on larger screens, but the phone workflow
+     should answer only: what is staged, TAKE it, or get back to the main source. */
+  .compact-director .quick-layouts,
+  .compact-director .force-sync-btn,
+  .compact-director .strip-end { display: none; }
+
+  /* Browse first, see exactly what will air second, then expose video/camera
+     controls. This matches the child image workflow rather than desktop density. */
+  .compact-director .console-library { order: 1; height: auto; min-height: 470px; }
+  .compact-director .console-preview { order: 2; min-height: 430px; }
+  .compact-director .console-monitor { order: 3; min-height: 420px; }
+
+  .compact-director .library-tabs button,
+  .compact-director .image-library__search-row button,
+  .compact-director .image-library__upload-actions .secondary-button,
+  .compact-director .favorite-button,
+  .compact-director .stage-take-trigger {
+    min-height: 44px;
+  }
+  .compact-director .image-library__search-row input { min-height: 44px; font-size: 16px; }
+  .compact-director .image-library__upload-actions { align-items: stretch; }
+  .compact-director .image-library__upload-actions .secondary-button { flex: 0 0 auto; }
+  .compact-director .image-library__upload-actions .muted-note { align-self: center; flex: 1 1 160px; }
+
+  .compact-director .console-library .asset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compact-director .console-library .asset-card { min-height: 132px; }
+  .compact-director .console-library .asset-card img { height: 96px; }
+
+  /* The MVP still allows advanced presentation from desktop. On a phone the
+     default full-screen Fade is intentionally hidden; only framing/motion need
+     to be understandable to a novice. */
+  .compact-director .presentation-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compact-director .presentation-controls label:nth-child(-n+4) { display: none; }
+  .compact-director .presentation-controls label { grid-column: auto !important; }
+  .compact-director .presentation-controls select { min-height: 44px; font-size: 16px; }
+  .compact-director .preview-actions { align-items: stretch; flex-direction: column; }
+  .compact-director .preview-actions > span { white-space: normal; }
+  .compact-director .stage-take-trigger { width: 100%; justify-content: center; font-size: .8rem; }
+}
+
+@media (max-width: 460px) {
+  .director-shell.compact-director { padding: 8px; gap: 8px; }
+  .compact-director .on-air-strip { padding: 8px; }
+  .compact-director .on-air-status { width: 100%; }
+  .compact-director .on-air-copy > span:last-child { display: none; }
+  .compact-director .master-controls { gap: 6px; }
+  .compact-director .kbd-hint { display: none; }
+  .compact-director .library-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compact-director .image-library__upload-actions .secondary-button { width: 100%; }
+  .compact-director .image-library__upload-actions .muted-note,
+  .compact-director .image-library__upload-actions .upload-notice { flex: 1 1 100%; text-align: center; }
+  .compact-director .console-library .asset-grid { gap: 8px; }
+}
