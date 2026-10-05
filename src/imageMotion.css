@@ -1,0 +1,51 @@
+/* Shared still-image motion. Output opts in with motion-auto; Director Preview
+   animates staged images by default for the image-first MVP. */
+.output-shell.broadcast-output.motion-auto .graphic-image-current img,
+.compact-director .composition-preview .presentation-asset > img {
+  transform-origin: center center;
+  will-change: transform;
+  animation-duration: 22s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+.output-shell.broadcast-output.motion-auto.motion-variant-0 .graphic-image-current img,
+.compact-director .composition-preview .presentation-asset > img {
+  animation-name: still-motion-zoom-in;
+}
+.output-shell.broadcast-output.motion-auto.motion-variant-1 .graphic-image-current img { animation-name: still-motion-drift-right; }
+.output-shell.broadcast-output.motion-auto.motion-variant-2 .graphic-image-current img { animation-name: still-motion-drift-left; }
+.output-shell.broadcast-output.motion-auto.motion-variant-3 .graphic-image-current img { animation-name: still-motion-drift-up; }
+
+.output-shell.broadcast-output.motion-still .graphic-image-current img {
+  animation: none;
+  transform: none;
+  will-change: auto;
+}
+
+@keyframes still-motion-zoom-in {
+  from { transform: scale(1.01); }
+  to { transform: scale(1.075); }
+}
+@keyframes still-motion-drift-right {
+  from { transform: scale(1.08) translate3d(-1.4%, -.6%, 0); }
+  to { transform: scale(1.04) translate3d(1.4%, .6%, 0); }
+}
+@keyframes still-motion-drift-left {
+  from { transform: scale(1.05) translate3d(1.3%, -.5%, 0); }
+  to { transform: scale(1.08) translate3d(-1.3%, .5%, 0); }
+}
+@keyframes still-motion-drift-up {
+  from { transform: scale(1.07) translate3d(.4%, 1.2%, 0); }
+  to { transform: scale(1.04) translate3d(-.4%, -1.2%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .output-shell.broadcast-output .graphic-image-current img,
+  .compact-director .composition-preview .presentation-asset > img {
+    animation: none !important;
+    transform: none !important;
+    will-change: auto;
+  }
+}
