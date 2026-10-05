@@ -21,3 +21,10 @@ android-tv/**/build/
 .android-sdk/
 .gradle-cache/
 .build-tmp/
+
+# Deployment runs, staging and rollback archives
+deployment/runs/
+deployment/releases/
+deployment/backups/
+.deploy-runs/
+*-runs/

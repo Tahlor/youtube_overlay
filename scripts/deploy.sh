@@ -2,8 +2,8 @@
 set -euo pipefail
 # Archimedes code-only promotion. Runtime data, .env and host configuration are untouched.
 source_dir=$(cd "$(dirname "$0")/.." && pwd)
-run_dir=${1:?Usage: scripts/deploy.sh RUN_DIRECTORY}
 production=/home/ubuntu/Projects/youtube_overlay
+run_dir=${1:-"$production/deployment/runs"}
 service=app-youtube-overlay.service
 commit=$(git -C "$source_dir" rev-parse HEAD)
 git -C "$source_dir" diff --quiet
@@ -11,11 +11,15 @@ git -C "$source_dir" diff --cached --quiet
 node -e 'const b=JSON.parse(require("fs").readFileSync(process.argv[1]));if(b.commit!==process.argv[2])process.exit(1)' "$source_dir/dist/build.json" "$commit"
 mkdir -p "$run_dir"
 run_dir=$(cd "$run_dir" && pwd)
+if [[ "$run_dir" != "$production"* ]]; then
+  echo "Error: run_dir must be inside $production (e.g. $production/deployment/runs). Do not pollute parent directory." >&2
+  exit 1
+fi
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 stage="$run_dir/release-$stamp"
 backup="$run_dir/rollback-$stamp"
 mkdir -p "$stage" "$backup/original" "$backup/retired"
-paths=(src server public dist dist-server node_modules package.json package-lock.json tsconfig.json tsconfig.server.json vite.config.ts index.html README.md docs scripts .env.example)
+paths=(src server public dist dist-server node_modules package.json package-lock.json tsconfig.json tsconfig.server.json vite.config.ts index.html README.md docs scripts .env.example android-tv)
 for item in "${paths[@]}"; do
   if [[ "$item" != node_modules && -e "$source_dir/$item" ]]; then cp -a "$source_dir/$item" "$stage/$item"; fi
 done
