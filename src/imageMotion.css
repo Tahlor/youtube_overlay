@@ -1,6 +1,8 @@
-/* Shared still-image motion. Output opts in with motion-auto; Director Preview
+/* Shared still-image motion. Output opts in with motion-auto; legacy scenes
+   without an explicit motion class also default to auto. Director Preview
    animates staged images by default for the image-first MVP. */
 .output-shell.broadcast-output.motion-auto .graphic-image-current img,
+.output-shell.broadcast-output.motion-undefined .graphic-image-current img,
 .compact-director .composition-preview .presentation-asset > img {
   transform-origin: center center;
   will-change: transform;
@@ -11,12 +13,16 @@
 }
 
 .output-shell.broadcast-output.motion-auto.motion-variant-0 .graphic-image-current img,
+.output-shell.broadcast-output.motion-undefined.motion-variant-0 .graphic-image-current img,
 .compact-director .composition-preview .presentation-asset > img {
   animation-name: still-motion-zoom-in;
 }
-.output-shell.broadcast-output.motion-auto.motion-variant-1 .graphic-image-current img { animation-name: still-motion-drift-right; }
-.output-shell.broadcast-output.motion-auto.motion-variant-2 .graphic-image-current img { animation-name: still-motion-drift-left; }
-.output-shell.broadcast-output.motion-auto.motion-variant-3 .graphic-image-current img { animation-name: still-motion-drift-up; }
+.output-shell.broadcast-output.motion-auto.motion-variant-1 .graphic-image-current img,
+.output-shell.broadcast-output.motion-undefined.motion-variant-1 .graphic-image-current img { animation-name: still-motion-drift-right; }
+.output-shell.broadcast-output.motion-auto.motion-variant-2 .graphic-image-current img,
+.output-shell.broadcast-output.motion-undefined.motion-variant-2 .graphic-image-current img { animation-name: still-motion-drift-left; }
+.output-shell.broadcast-output.motion-auto.motion-variant-3 .graphic-image-current img,
+.output-shell.broadcast-output.motion-undefined.motion-variant-3 .graphic-image-current img { animation-name: still-motion-drift-up; }
 
 .output-shell.broadcast-output.motion-still .graphic-image-current img {
   animation: none;
