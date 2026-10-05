@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.server.json && vite build && node scripts/build-info.mjs",
     "start": "node dist-server/server/index.js",
     "test": "tsx --test tests/*.test.ts",
-    "check": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && npm test && npm run build",
+    "check": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && npm run build && npm test",
     "test:browser": "node tests/browser.mjs",
     "test:playback": "node tests/playback-browser.mjs",
     "test:broadcast": "node tests/broadcast-browser.mjs",
