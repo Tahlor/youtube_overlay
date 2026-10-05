@@ -21,15 +21,18 @@ export function normalizePresentation(value: unknown): PresentationSettings {
       (settings.motion !== undefined && !['auto', 'still'].includes(settings.motion))) {
     throw new Error('Invalid presentation settings.');
   }
-  return {
+  const normalized: PresentationSettings = {
     layout: settings.layout as PresentationSettings['layout'],
     corner: settings.corner as PresentationSettings['corner'],
     size: settings.size as PresentationSettings['size'],
     transition: settings.transition as PresentationSettings['transition'],
     fit: settings.fit as PresentationSettings['fit'],
-    // Existing saved Programs predate motion. Migrate them to the new default.
-    motion: settings.motion ?? 'auto',
   };
+  // Preserve the old socket/state shape for legacy clients. New state created
+  // from DEFAULT_PRESENTATION carries motion explicitly; renderers default an
+  // omitted legacy value to auto.
+  if (settings.motion !== undefined) normalized.motion = settings.motion;
+  return normalized;
 }
 
 /** Stable low-cost motion variant shared by Preview and Program. */
