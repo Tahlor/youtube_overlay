@@ -8,6 +8,7 @@ const initialState: ProgramState = {
   videoId: null,
   source: 'youtube',
   audio: defaultAudio(),
+  scene: { kind: 'main' },
   mode: "live",
   activeAsset: null,
   revision: 0,
