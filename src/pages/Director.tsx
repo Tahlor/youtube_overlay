@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Asset, CameraSource, InputSource, PlaybackSample, PresentationSettings } from "../shared/types";
-import { DEFAULT_PRESENTATION } from "../shared/presentation";
+import { DEFAULT_PRESENTATION, imageMotionVariant } from "../shared/presentation";
 import { CAMERA_SOURCES, INPUT_SOURCES, effectiveAudioSource } from "../shared/input";
 import { parseYouTubeVideoId } from "../shared/youtube";
 import { sendCommand } from "../commands";
@@ -34,6 +34,7 @@ export function Director() {
   const [directorClaimed, setDirectorClaimed] = useState(false);
   const [videoInput, setVideoInput] = useState("");
   const [preview, setPreview] = useState<Asset | null>(null);
+  const [previewRevision, setPreviewRevision] = useState(program.revision);
   const [error, setError] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
   const [previewReady, setPreviewReady] = useState(false);
@@ -141,13 +142,20 @@ export function Director() {
     }
   }, [previewStream, directorStream]);
 
+  // Program changes should not silently rewrite an already-staged private draft.
   useEffect(() => {
-    setPresentation({ ...currentPresentation });
-  }, [currentPresentation.layout, currentPresentation.corner, currentPresentation.size, currentPresentation.transition, currentPresentation.fit]);
+    if (!preview) setPresentation({ ...currentPresentation });
+  }, [preview, currentPresentation.layout, currentPresentation.corner, currentPresentation.size, currentPresentation.transition, currentPresentation.fit, currentPresentation.motion]);
 
   function select(asset: Asset) {
     setPreviewReady(false);
     setPreviewVersion(value => value + 1);
+    setPreviewRevision(program.revision);
+    setPresentation(current => ({
+      ...DEFAULT_PRESENTATION,
+      transition: current.transition === 'cut' ? 'cut' : 'fade',
+      motion: 'auto',
+    }));
     setPreview(asset);
   }
 
@@ -235,12 +243,12 @@ export function Director() {
 
   function takePreview() {
     if (preview && previewReady && connected && directorClaimed) {
-      void command("program:take", { asset: preview, presentation });
+      void command("program:take", { asset: preview, presentation, expectedRevision: previewRevision });
     }
   }
 
   function goLive() {
-    if (connected && directorClaimed) void command("program:live");
+    if (connected && directorClaimed) void command("program:live", { expectedRevision: program.revision });
   }
 
   async function forceSync() {
@@ -362,7 +370,7 @@ export function Director() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [connected, directorClaimed, preview, previewReady, program.mode, program.videoId, togglePlayPause, skipVideo, seekLive]);
+  }, [connected, directorClaimed, preview, previewReady, previewRevision, program.mode, program.revision, program.videoId, togglePlayPause, skipVideo, seekLive]);
 
   const onAirTitle = program.mode === "graphic" && program.activeAsset
     ? program.activeAsset.title
@@ -376,6 +384,8 @@ export function Director() {
   const syncDrift = (isYouTubeSelected && outputPlayback && monitorSample && outputPlayback.videoId === monitorSample.videoId)
     ? Math.abs(outputPlayback.currentTime - monitorSample.currentTime)
     : null;
+
+  const previewMotionVariant = preview ? imageMotionVariant(preview) : 0;
 
   return (
     <main className="director-shell compact-director">
@@ -454,10 +464,10 @@ export function Director() {
             className="live-button"
             onClick={goLive}
             disabled={!connected || !directorClaimed}
-            title="Remove graphic and return to live video · LIVE (Esc)"
-            aria-label="Return to live video (Escape)"
+            title="Return to the main source (Escape)"
+            aria-label="Return to main source (Escape)"
           >
-            <span className="live-dot" /> LIVE <span className="kbd-hint">Esc</span>
+            <span className="live-dot" /> Main source <span className="kbd-hint">Esc</span>
           </button>
 
           <div className="quick-layouts" role="group" aria-label="Quick layout selector">
@@ -512,7 +522,7 @@ export function Director() {
               <strong>Shortcuts</strong>
               <ul>
                 <li><kbd>Enter</kbd> <span>TAKE staged image</span></li>
-                <li><kbd>Esc</kbd> <span>Back to video</span></li>
+                <li><kbd>Esc</kbd> <span>Return to main source</span></li>
                 <li><kbd>Space</kbd> <span>Play / Pause</span></li>
                 <li><kbd>←</kbd> <kbd>→</kbd> <span>Skip 10s</span></li>
                 <li><kbd>L</kbd> <span>Seek to Live</span></li>
@@ -720,7 +730,7 @@ export function Director() {
           {preview ? (
             <div className="preview-content">
               <div
-                className={`composition-preview layout-${presentation.layout} fit-${presentation.fit}`}
+                className={`composition-preview layout-${presentation.layout} fit-${presentation.fit} motion-${presentation.motion ?? 'auto'} motion-variant-${previewMotionVariant}`}
                 aria-label={`Staged ${presentation.layout} composition preview`}
               >
                 {presentation.layout !== "image" && (
@@ -785,6 +795,13 @@ export function Director() {
               <select aria-label="Image fit" value={presentation.fit} onChange={event => setPresentation(value => ({ ...value, fit: event.target.value as PresentationSettings["fit"] }))}>
                 <option value="contain">Fit whole image</option>
                 <option value="cover">Fill frame</option>
+              </select>
+            </label>
+            <label>
+              <span>Motion</span>
+              <select aria-label="Image motion" value={presentation.motion ?? 'auto'} onChange={event => setPresentation(value => ({ ...value, motion: event.target.value as NonNullable<PresentationSettings["motion"]> }))}>
+                <option value="auto">Auto motion</option>
+                <option value="still">Still</option>
               </select>
             </label>
           </div>
