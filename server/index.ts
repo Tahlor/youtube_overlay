@@ -12,6 +12,7 @@ import { LibraryStore } from './library.js';
 import { createImageSearchRouter } from './imageSearch.js';
 import { LdsLibraryProvider } from './ldsLibrary.js';
 import { attachInputSignaling, directorAccessKey } from './inputSignaling.js';
+import { createUploadRouter } from './uploads.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -20,6 +21,7 @@ const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { path: `${basePath}/socket.io`, maxHttpBufferSize: 32000 });
 const dataPath = process.env.DATA_PATH ?? path.resolve('data/overlay.sqlite');
+const uploadPath = process.env.UPLOAD_PATH ?? path.join(path.dirname(dataPath), 'uploads');
 const directorKey = directorAccessKey(dataPath);
 let library: LibraryStore | null = null;
 let persistenceError = false;
@@ -75,6 +77,13 @@ app.post(`${basePath}/api/library/favorite`, (req,res) => {
     res.json({ ok: true });
   } catch { persistenceError = true; res.status(503).json({ error: 'Could not save favorite. Program controls still work.' }); }
 });
+app.use(`${basePath}/uploads`, createUploadRouter({
+  uploadDir: uploadPath,
+  publicBasePath: basePath,
+  library,
+  directorKey,
+  onChanged: () => io.emit('library:changed'),
+}));
 
 const webDist = path.resolve('dist');
 app.use(basePath || '/', express.static(webDist, { index: false }));
@@ -82,7 +91,7 @@ app.get([`${basePath}/`, `${basePath}/director`, `${basePath}/output`, `${basePa
   res.set('Cache-Control', 'no-store').sendFile(path.join(webDist, 'index.html'));
 });
 app.use((error: { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  res.status(error.status ?? 500).json({ error: 'Invalid request.' });
+  res.status(error.status ?? 500).json({ error: error.status === 413 ? 'Image is too large. Maximum size is 12 MB.' : 'Invalid request.' });
 });
 
 io.on('connection', socket => {
