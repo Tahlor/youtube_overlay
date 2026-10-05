@@ -1,4 +1,4 @@
-import type { Asset, CameraSource, InputSource, ProgramAudio, ProgramState, PlaybackCommand, PlaybackState } from "../src/shared/types.js";
+import type { Asset, CameraSource, InputSource, ProgramAudio, ProgramScene, ProgramState, PlaybackCommand, PlaybackState, PresentationSettings } from "../src/shared/types.js";
 import { isVideoTime, playbackPosition, MAX_VIDEO_SECONDS } from "../src/shared/playback.js";
 import { defaultAudio, effectiveAudioSource, isInputSource, INPUT_SOURCES } from "../src/shared/input.js";
 import { normalizeAsset } from "../src/shared/asset.js";
@@ -10,6 +10,7 @@ export class ProgramStore {
     videoId: null,
     source: "youtube",
     audio: defaultAudio(),
+    scene: { kind: 'main' },
     mode: "live",
     activeAsset: null,
     revision: 0,
@@ -17,7 +18,7 @@ export class ProgramStore {
     presentation: { ...DEFAULT_PRESENTATION },
   };
 
-  constructor(saved?: (Pick<ProgramState, 'videoId' | 'mode' | 'activeAsset' | 'revision'> & Partial<Pick<ProgramState, 'source' | 'audio' | 'playback' | 'presentation'>>) | null) {
+  constructor(saved?: (Pick<ProgramState, 'videoId' | 'mode' | 'activeAsset' | 'revision'> & Partial<Pick<ProgramState, 'scene' | 'source' | 'audio' | 'playback' | 'presentation'>>) | null) {
     if (saved) {
       if (saved.videoId !== null && !isYouTubeVideoId(saved.videoId)) throw new Error("Invalid saved video.");
       if (!Number.isSafeInteger(saved.revision) || saved.revision < 0) throw new Error("Invalid saved revision.");
@@ -28,15 +29,22 @@ export class ProgramStore {
         throw new Error("Invalid saved playback.");
       }
       const audio = normalizeAudio(saved.audio);
+      const legacyPresentation = normalizePresentation(saved.presentation);
+      const legacyAsset = saved.mode === "graphic" ? normalizeAsset(saved.activeAsset) : null;
+      const scene = normalizeScene(saved.scene, saved.mode, legacyAsset, legacyPresentation);
+      const presentation = scene.kind === 'image' ? scene.presentation : legacyPresentation;
+      const activeAsset = scene.kind === 'image' ? scene.asset : null;
       // Resume from the saved point after a process restart; downtime is not viewing time.
       this.state = {
         ...saved,
         // Camera sessions and their invite tokens end with the server process.
         source: "youtube",
         audio: { ...audio, followSelected: true, source: 'youtube' },
+        scene,
+        mode: scene.kind === 'image' ? 'graphic' : 'live',
+        activeAsset,
         playback: { ...playback, updatedAt: playback.status === 'playing' && playback.position !== null ? Date.now() : playback.updatedAt },
-        presentation: normalizePresentation(saved.presentation),
-        activeAsset: saved.mode === "graphic" ? normalizeAsset(saved.activeAsset) : null,
+        presentation,
       };
     }
   }
@@ -131,11 +139,14 @@ export class ProgramStore {
     return this.getState();
   }
 
-  take(asset: Asset, presentation?: unknown): ProgramState {
+  take(asset: Asset, presentation?: unknown, expectedRevision?: unknown): ProgramState {
     const valid = normalizeAsset(asset);
     const settings = presentation === undefined ? this.state.presentation : normalizePresentation(presentation);
+    assertExpectedRevision(expectedRevision, this.state.revision);
+    const scene: ProgramScene = { kind: 'image', asset: valid, presentation: settings };
     this.state = {
       ...this.state,
+      scene,
       mode: "graphic",
       activeAsset: valid,
       presentation: settings,
@@ -144,15 +155,42 @@ export class ProgramStore {
     return this.getState();
   }
 
-  goLive(): ProgramState {
+  goLive(expectedRevision?: unknown): ProgramState {
+    assertExpectedRevision(expectedRevision, this.state.revision);
     this.state = {
       ...this.state,
+      scene: { kind: 'main' },
       mode: "live",
       activeAsset: null,
       revision: this.state.revision + 1,
     };
     return this.getState();
   }
+}
+
+function normalizeScene(value: unknown, legacyMode: ProgramState['mode'], legacyAsset: Asset | null, legacyPresentation: PresentationSettings): ProgramScene {
+  if (value === undefined || value === null) {
+    return legacyMode === 'graphic' && legacyAsset
+      ? { kind: 'image', asset: legacyAsset, presentation: legacyPresentation }
+      : { kind: 'main' };
+  }
+  if (typeof value !== 'object') throw new Error('Invalid saved scene.');
+  const scene = value as Partial<ProgramScene> & { asset?: unknown; presentation?: unknown };
+  if (scene.kind === 'main') return { kind: 'main' };
+  if (scene.kind === 'image') {
+    return {
+      kind: 'image',
+      asset: normalizeAsset(scene.asset),
+      presentation: normalizePresentation(scene.presentation),
+    };
+  }
+  throw new Error('Invalid saved scene.');
+}
+
+function assertExpectedRevision(value: unknown, current: number): void {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error('Invalid Program revision.');
+  if (value !== current) throw new Error('Program changed since this Preview was staged. Review Program and TAKE again.');
 }
 
 function normalizeAudio(value: unknown): ProgramAudio {
