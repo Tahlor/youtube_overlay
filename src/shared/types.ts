@@ -16,7 +16,9 @@ export interface PresentationSettings {
   size: 'small' | 'medium' | 'large';
   transition: 'cut' | 'fade' | 'slide';
   fit: 'contain' | 'cover';
-  motion: ImageMotion;
+  // Optional during protocol migration: legacy clients omit it; renderers treat
+  // omission as auto motion. New Director state always supplies a value.
+  motion?: ImageMotion;
 }
 
 export interface Asset {
