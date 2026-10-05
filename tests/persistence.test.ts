@@ -6,14 +6,16 @@ import path from 'node:path';
 import { LibraryStore } from '../server/library.js';
 import { ProgramStore } from '../server/programState.js';
 const asset = { id:'one',title:'One',fullUrl:'https://upload.wikimedia.org/one.jpg',source:'Wikimedia Commons',sourceUrl:'https://commons.wikimedia.org/wiki/File:One.jpg',author:'Creator',license:'CC BY-SA' };
-test('SQLite restores favorites, usage, attribution and full Program after reopen', () => {
+test('SQLite restores uploads, favorites, usage, attribution and full Program after reopen', () => {
   const dir=mkdtempSync(path.join(tmpdir(),'overlay-db-'));
   try {
     let db=new LibraryStore(path.join(dir,'state.sqlite'));
     const state=new ProgramStore(); state.setVideo('aqz-KE-bpKQ'); state.take(asset);
-    db.favorite(asset,true); db.used(asset); db.used(asset); db.saveProgram(state.getState()); db.close();
+    const uploaded={ id:'upload:abc',title:'Family photo.png',fullUrl:'/uploads/files/abc.png',thumbnailUrl:'/uploads/files/abc.png',source:'Upload' };
+    db.imported(uploaded); db.favorite(asset,true); db.used(asset); db.used(asset); db.saveProgram(state.getState()); db.close();
     db=new LibraryStore(path.join(dir,'state.sqlite'));
     assert.deepEqual(new ProgramStore(db.readProgram()).getState(),state.getState());
+    assert.deepEqual(db.list().uploads[0].asset,uploaded);
     assert.deepEqual(db.list().favorites[0].asset,asset);
     assert.equal(db.list().recent[0].useCount,2); assert.ok(db.list().recent[0].lastUsed);
     const second={...asset,id:'two',title:'Two'}; db.used(second);
