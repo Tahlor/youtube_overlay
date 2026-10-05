@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AssetImage } from '../components/AssetImage';
 import { Attribution } from '../components/Attribution';
 import { YouTubePlayer } from '../components/YouTubePlayer';
-import { DEFAULT_PRESENTATION } from '../shared/presentation';
-import type { Asset, PresentationSettings } from '../shared/types';
+import { DEFAULT_PRESENTATION, imageMotionVariant } from '../shared/presentation';
+import type { Asset, PresentationSettings, ProgramScene } from '../shared/types';
 import { effectiveAudioSource } from '../shared/input';
 import { useInputReceiver } from '../media/useInputReceiver';
 import { useProgram } from '../useProgram';
@@ -14,7 +14,11 @@ const TRANSITION_MS = 350;
 export function Output() {
   const { program, connected, clockOffset, reportPlayback } = useProgram();
   const tvControls = new URLSearchParams(window.location.search).get('tv') === '1';
-  const presentation = program.presentation ?? DEFAULT_PRESENTATION;
+  const legacyScene: ProgramScene = program.mode === 'graphic' && program.activeAsset
+    ? { kind: 'image', asset: program.activeAsset, presentation: program.presentation ?? DEFAULT_PRESENTATION }
+    : { kind: 'main' };
+  const scene = program.scene ?? legacyScene;
+  const presentation = scene.kind === 'image' ? scene.presentation : (program.presentation ?? DEFAULT_PRESENTATION);
   const selected = program.source ?? 'youtube';
   const audio = program.audio;
   const camera = useInputReceiver(selected, selected !== 'youtube', 'video');
@@ -39,8 +43,9 @@ export function Output() {
     if (cameraVideoRef.current) cameraVideoRef.current.volume = 0;
     if (audioRef.current) audioRef.current.volume = level.volume / 100;
   }, [audioSource, selected, level.volume, cameraFallback]);
-  const graphicActive = program.mode === 'graphic' && Boolean(program.activeAsset);
-  const [heldGraphic, setHeldGraphic] = useState<Asset | null>(program.activeAsset);
+  const activeGraphic = scene.kind === 'image' ? scene.asset : null;
+  const graphicActive = Boolean(activeGraphic);
+  const [heldGraphic, setHeldGraphic] = useState<Asset | null>(activeGraphic);
   const [cameraPlayBlocked, setCameraPlayBlocked] = useState(false);
   const [audioPlayBlocked, setAudioPlayBlocked] = useState(false);
   useEffect(() => { setCameraPlayBlocked(false); setAudioPlayBlocked(false); }, [selected, audioSource, cameraFallback]);
@@ -48,8 +53,8 @@ export function Output() {
 
   // Keep the outgoing graphic for the short transition back to live video.
   useEffect(() => {
-    if (graphicActive && program.activeAsset) {
-      setHeldGraphic(program.activeAsset);
+    if (graphicActive && activeGraphic) {
+      setHeldGraphic(activeGraphic);
       return;
     }
     if (!heldGraphic) return;
@@ -58,9 +63,10 @@ export function Output() {
       presentation.transition === 'cut' ? 0 : TRANSITION_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [graphicActive, program.activeAsset?.id, program.activeAsset?.fullUrl, program.activeAsset?.title, presentation.transition]);
+  }, [graphicActive, activeGraphic?.id, activeGraphic?.fullUrl, activeGraphic?.title, presentation.transition]);
 
-  const graphic = graphicActive ? program.activeAsset : heldGraphic;
+  const graphic = graphicActive ? activeGraphic : heldGraphic;
+  const motionVariant = graphic ? imageMotionVariant(graphic) : 0;
   const shellClasses = [
     'output-shell',
     'broadcast-output',
@@ -70,9 +76,11 @@ export function Output() {
     `corner-${presentation.corner}`,
     `size-${presentation.size}`,
     `fit-${presentation.fit}`,
+    `motion-${presentation.motion}`,
+    `motion-variant-${motionVariant}`,
   ].join(' ');
 
-  return <main className={shellClasses} data-broadcast-output data-layout={presentation.layout} data-corner={presentation.corner}>
+  return <main className={shellClasses} data-broadcast-output data-layout={presentation.layout} data-corner={presentation.corner} data-scene={scene.kind}>
     {!connected && <div className="connection-ribbon" role="status">Reconnecting…</div>}
 
     {/* One mounted player stays in place while the image stage changes around it. */}
@@ -116,11 +124,11 @@ export function Output() {
       </div>}
     </section>
 
-    {graphicActive && program.activeAsset && <details className="audience-info">
+    {graphicActive && activeGraphic && <details className="audience-info">
       <summary aria-label="Image information" title="Image information">ⓘ</summary>
       <div className="audience-info-card">
-        <strong>{program.activeAsset.title}</strong>
-        <Attribution asset={program.activeAsset} />
+        <strong>{activeGraphic.title}</strong>
+        <Attribution asset={activeGraphic} />
       </div>
     </details>}
   </main>;
