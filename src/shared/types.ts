@@ -96,6 +96,7 @@ export interface LibraryAsset {
 }
 
 export interface Library {
+  uploads: LibraryAsset[];
   favorites: LibraryAsset[];
   recent: LibraryAsset[];
 }
