@@ -5,6 +5,7 @@ import { Output } from "./pages/Output";
 import { Phone } from "./pages/Phone";
 import { appPath, currentAppPath } from "./basePath";
 import "./styles.css";
+import "./imageMotion.css";
 
 function App() {
   const path = currentAppPath();
