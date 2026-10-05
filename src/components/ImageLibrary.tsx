@@ -10,8 +10,10 @@ export const TEST_ASSET: Asset = { id: 'm0-test-graphic', title: 'General Confer
 
 type SearchProvider = 'all' | 'lds' | 'commons' | 'openverse';
 type ProviderName = Exclude<SearchProvider, 'all'>;
+type LibraryTab = 'Search' | 'Uploads' | 'Favorites' | 'Recent';
 const SOURCE_LABELS: Record<ProviderName, string> = { lds: 'Church Media', commons: 'Wikimedia', openverse: 'Openverse' };
 const DEFAULT_SOURCES: ProviderName[] = ['commons', 'openverse'];
+const UPLOAD_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 type ProviderProgress = { state: 'loading' | 'done' | 'error'; count: number; error?: string };
 type SearchContext = { query: string; provider: SearchProvider };
 type SearchEvent =
@@ -31,8 +33,8 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
   const [sources, setSources] = useState<ProviderName[]>(DEFAULT_SOURCES);
   const [provider, setProvider] = useState<SearchProvider>('all');
   const [results, setResults] = useState<Asset[]>([]);
-  const [tab, setTab] = useState<'Search' | 'Favorites' | 'Recent'>('Search');
-  const [library, setLibrary] = useState<Library>({ favorites: [], recent: [] });
+  const [tab, setTab] = useState<LibraryTab>('Search');
+  const [library, setLibrary] = useState<Library>({ uploads: [], favorites: [], recent: [] });
   const [busy, setBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -40,17 +42,24 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
   const [directError, setDirectError] = useState('');
   const [libraryError, setLibraryError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadNotice, setUploadNotice] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [progress, setProgress] = useState<Partial<Record<ProviderName, ProviderProgress>>>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [searchContext, setSearchContext] = useState<SearchContext | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const searchAbort = useRef<AbortController | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const resultRef = useRef<Asset[]>([]);
 
   const refresh = useCallback(() => {
-    request<Library>('api/library').then(data => { setLibrary(data); setLibraryError(''); }).catch(error => setLibraryError(error.message));
+    request<Library>('api/library').then(data => {
+      setLibrary({ uploads: data.uploads ?? [], favorites: data.favorites ?? [], recent: data.recent ?? [] });
+      setLibraryError('');
+    }).catch(error => setLibraryError(error.message));
   }, []);
 
   useEffect(() => {
@@ -63,13 +72,60 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
     refresh();
     socket.on('library:changed', refresh);
     socket.on('connect', refresh);
+    const onPaste = (event: ClipboardEvent) => {
+      const image = Array.from(event.clipboardData?.files ?? []).find(file => UPLOAD_TYPES.has(file.type));
+      if (!image) return;
+      event.preventDefault();
+      void uploadImage(image, true);
+    };
+    window.addEventListener('paste', onPaste);
     return () => {
       generation.current++;
       socket.off('library:changed', refresh);
       socket.off('connect', refresh);
+      window.removeEventListener('paste', onPaste);
       searchAbort.current?.abort();
     };
   }, [refresh]);
+
+  async function uploadImage(file: File, pasted = false) {
+    if (!UPLOAD_TYPES.has(file.type)) {
+      setUploadError('Choose a PNG, JPEG, or WebP image.');
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      setUploadError('Image is too large. Maximum size is 12 MB.');
+      return;
+    }
+    setUploading(true);
+    setUploadError('');
+    setUploadNotice(pasted ? 'Pasting image…' : 'Uploading image…');
+    try {
+      const key = window.localStorage.getItem('overlay-director-access') ?? '';
+      const fallbackName = pasted && !file.name ? `Pasted image.${file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'}` : file.name;
+      const response = await fetch(appPath('uploads'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type,
+          'X-Upload-Name': encodeURIComponent(fallbackName || 'Uploaded image'),
+          ...(key ? { 'X-Director-Access-Key': key } : {}),
+        },
+        body: file,
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await response.json() as { asset?: Asset; error?: string };
+      if (!response.ok || !data.asset) throw new Error(data.error ?? 'Could not upload this image.');
+      setUploadNotice(pasted ? 'Pasted image ready' : 'Uploaded image ready');
+      setTab('Uploads');
+      refresh();
+      select(data.asset);
+    } catch (error) {
+      setUploadNotice('');
+      setUploadError(error instanceof Error ? error.message : 'Could not upload this image.');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function runSearch(loadNext = false) {
     const targetQuery = loadNext ? searchContext?.query ?? '' : query.trim();
@@ -232,7 +288,9 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
     finally { setSaving(false); }
   }
 
-  const assets = tab === 'Search' ? results : library[tab === 'Favorites' ? 'favorites' : 'recent'].map(row => row.asset);
+  const assets = tab === 'Search' ? results
+    : tab === 'Uploads' ? library.uploads.map(row => row.asset)
+      : library[tab === 'Favorites' ? 'favorites' : 'recent'].map(row => row.asset);
   const canLoadMore = !!nextCursor && hasMore && !!searchContext &&
     query.trim() === searchContext.query && provider === searchContext.provider;
   const contextIsCurrent = !!searchContext && query.trim() === searchContext.query && provider === searchContext.provider;
@@ -254,9 +312,23 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
     <div className="image-library__top">
       <h2 id="image-library-title">Images</h2>
       <div className="library-tabs" role="tablist" aria-label="Image library">
-        {(['Search', 'Favorites', 'Recent'] as const).map(name => <button key={name} role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{name}</button>)}
+        {(['Search', 'Uploads', 'Favorites', 'Recent'] as const).map(name => <button key={name} role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>{name}</button>)}
       </div>
     </div>
+
+    <div className="image-library__upload-actions">
+      <input ref={fileInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (file) void uploadImage(file);
+      }} />
+      <button type="button" className="secondary-button" disabled={uploading} onClick={() => fileInput.current?.click()}>
+        {uploading ? 'Adding image…' : 'Upload image'}
+      </button>
+      <span className="muted-note">or copy an image and paste it anywhere here</span>
+      {uploadNotice && <span className="upload-notice" role="status">{uploadNotice}</span>}
+    </div>
+    {uploadError && <p className="error-message" role="alert">{uploadError}</p>}
 
     <form className="image-library__search" onSubmit={event => { event.preventDefault(); void runSearch(false); }}>
       <label className="visually-hidden" htmlFor="image-query">Search images</label>
@@ -306,7 +378,7 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
       </article>)}
     </div>
     {canLoadMore && tab === 'Search' && <button className="secondary-button image-library__more" disabled={busy} onClick={() => void runSearch(true)}>Load more images</button>}
-    {!busy && !assets.length && <p className="muted-note">{tab === 'Search' ? searched ? 'No images found. Try another search.' : 'Search and preview an image, then TAKE it to air.' : 'No ' + tab.toLowerCase() + ' yet.'}</p>}
+    {!busy && !assets.length && <p className="muted-note">{tab === 'Search' ? searched ? 'No images found. Try another search.' : 'Search and preview an image, then TAKE it to air.' : `No ${tab.toLowerCase()} yet.`}</p>}
     <form className="image-library__import" onSubmit={event => { event.preventDefault(); importDirectUrl(); }}>
       <label className="visually-hidden" htmlFor="image-url">Use an image URL</label>
       <div className="image-library__import-row">
