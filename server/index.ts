@@ -153,16 +153,20 @@ io.on('connection', socket => {
       return program.setAudio(payload as Parameters<ProgramStore['setAudio']>[0]);
     });
   });
-  socket.on('program:take', (payload: { asset?: unknown; presentation?: unknown }, ack?: unknown) => {
+  socket.on('program:take', (payload: { asset?: unknown; presentation?: unknown; expectedRevision?: unknown }, ack?: unknown) => {
     runCommand(ack, () => {
       requireDirector(socket.id);
-      return program.take(normalizeAsset(payload?.asset), payload?.presentation);
+      return program.take(normalizeAsset(payload?.asset), payload?.presentation, payload?.expectedRevision);
     }, true);
   });
-  socket.on('program:live', (ack?: unknown) => runCommand(ack, () => {
-    requireDirector(socket.id);
-    return program.goLive();
-  }));
+  socket.on('program:live', (payloadOrAck?: { expectedRevision?: unknown } | unknown, maybeAck?: unknown) => {
+    const payload = typeof payloadOrAck === 'function' ? undefined : payloadOrAck as { expectedRevision?: unknown } | undefined;
+    const ack = typeof payloadOrAck === 'function' ? payloadOrAck : maybeAck;
+    runCommand(ack, () => {
+      requireDirector(socket.id);
+      return program.goLive(payload?.expectedRevision);
+    });
+  });
   socket.on('program:force-sync', (ack?: unknown) => {
     runCommand(ack, () => {
       requireDirector(socket.id);
