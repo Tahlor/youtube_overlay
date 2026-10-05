@@ -20,22 +20,24 @@ test('all presentation layouts and positions round trip without changing playbac
   }
 });
 
-test('legacy saved Program migrates presentation and scene; returned settings cannot mutate the store', () => {
+test('legacy saved Program migrates scene and uses auto motion semantically without changing its wire shape', () => {
   const program = new ProgramStore({ videoId: null, mode: 'live', activeAsset: null, revision: 1 });
   assert.deepEqual(program.getState().presentation, DEFAULT_PRESENTATION);
   assert.deepEqual(program.getState().scene, { kind: 'main' });
   const taken = program.take(asset); taken.presentation.corner = 'top-left';
   assert.deepEqual(program.getState().presentation, DEFAULT_PRESENTATION);
 
+  const legacyPresentation: PresentationSettings = { layout: 'image', corner: 'bottom-right', size: 'medium', transition: 'fade', fit: 'contain' };
   const legacyGraphic = new ProgramStore({
     videoId: null,
     mode: 'graphic',
     activeAsset: asset,
     revision: 2,
-    presentation: { layout: 'image', corner: 'bottom-right', size: 'medium', transition: 'fade', fit: 'contain' } as PresentationSettings,
+    presentation: legacyPresentation,
   }).getState();
-  assert.equal(legacyGraphic.presentation.motion, 'auto');
-  assert.deepEqual(legacyGraphic.scene, { kind: 'image', asset, presentation: legacyGraphic.presentation });
+  assert.equal(legacyGraphic.presentation.motion ?? 'auto', 'auto');
+  assert.deepEqual(legacyGraphic.presentation, legacyPresentation);
+  assert.deepEqual(legacyGraphic.scene, { kind: 'image', asset, presentation: legacyPresentation });
 });
 
 test('motion variants are deterministic and bounded', () => {
