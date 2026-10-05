@@ -101,14 +101,12 @@ export function ImageLibrary({ preview, select }: { preview: Asset | null; selec
     setUploadError('');
     setUploadNotice(pasted ? 'Pasting image…' : 'Uploading image…');
     try {
-      const key = window.localStorage.getItem('overlay-director-access') ?? '';
       const fallbackName = pasted && !file.name ? `Pasted image.${file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'}` : file.name;
       const response = await fetch(appPath('uploads'), {
         method: 'POST',
         headers: {
           'Content-Type': file.type,
           'X-Upload-Name': encodeURIComponent(fallbackName || 'Uploaded image'),
-          ...(key ? { 'X-Director-Access-Key': key } : {}),
         },
         body: file,
         signal: AbortSignal.timeout(20000),
