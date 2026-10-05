@@ -6,6 +6,7 @@ import { Phone } from "./pages/Phone";
 import { appPath, currentAppPath } from "./basePath";
 import "./styles.css";
 import "./imageMotion.css";
+import "./directorMvp.css";
 
 function App() {
   const path = currentAppPath();
