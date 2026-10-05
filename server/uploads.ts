@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import express, { Router } from 'express';
@@ -18,7 +18,7 @@ export function createUploadRouter(options: {
   uploadDir: string;
   publicBasePath: string;
   library: LibraryStore | null;
-  directorKey: string | null;
+  isDirectorRequest(req: express.Request): boolean;
   onChanged(): void;
 }) {
   const router = Router();
@@ -31,7 +31,7 @@ export function createUploadRouter(options: {
     immutable: true,
   }));
 
-  router.post('/', requireDirector(options.directorKey), express.raw({
+  router.post('/', requireDirector(options.isDirectorRequest), express.raw({
     type: ['image/png', 'image/jpeg', 'image/webp'],
     limit: MAX_IMAGE_BYTES,
   }), (req, res) => {
@@ -108,22 +108,12 @@ function uploadTitle(encoded: string | undefined, fallback: string): string {
   }
 }
 
-function requireDirector(key: string | null) {
+function requireDirector(isDirectorRequest: (req: express.Request) => boolean) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    // Temporary adapter for the current deployment. #25 replaces this header
-    // with Webapps/SSO authorization; keep the upload boundary server-side now.
-    if (key === null) { next(); return; }
-    const supplied = req.get('x-director-access-key');
-    if (!supplied || !safeEqual(supplied, key)) {
-      res.status(401).json({ error: 'Director access is required to upload media.' });
+    if (!isDirectorRequest(req)) {
+      res.status(401).json({ error: 'Webapps sign-in is required to upload media.' });
       return;
     }
     next();
   };
-}
-
-function safeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
