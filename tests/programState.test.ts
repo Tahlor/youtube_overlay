@@ -11,12 +11,13 @@ const asset: Asset = {
   fullUrl: "/test-graphic.svg",
 };
 
-test("starts in a safe live state", () => {
+test("starts in a safe main scene", () => {
   const store = new ProgramStore();
   assert.deepEqual(store.getState(), {
     videoId: null,
     source: 'youtube',
     audio: defaultAudio(),
+    scene: { kind: 'main' },
     mode: "live",
     activeAsset: null,
     revision: 0,
@@ -55,19 +56,32 @@ test('audio follows selected input by default and rejects hidden YouTube audio',
   assert.equal(store.getState().audio.followSelected, true);
 });
 
-test("accepted commands advance revision and preserve invariants", () => {
+test("accepted image TAKE creates one canonical scene and preserves legacy compatibility", () => {
   const store = new ProgramStore();
   assert.equal(store.setVideo("dQw4w9WgXcQ").revision, 1);
 
-  const graphic = store.take(asset);
+  const graphic = store.take(asset, undefined, 1);
   assert.equal(graphic.revision, 2);
   assert.equal(graphic.mode, "graphic");
   assert.deepEqual(graphic.activeAsset, asset);
+  assert.deepEqual(graphic.scene, { kind: 'image', asset, presentation: DEFAULT_PRESENTATION });
 
-  const live = store.goLive();
+  const live = store.goLive(2);
   assert.equal(live.revision, 3);
   assert.equal(live.mode, "live");
   assert.equal(live.activeAsset, null);
+  assert.deepEqual(live.scene, { kind: 'main' });
+});
+
+test('stale revision cannot TAKE or return over a newer Program', () => {
+  const store = new ProgramStore();
+  store.setVideo('dQw4w9WgXcQ');
+  const stagedRevision = store.getState().revision;
+  store.setVideo('aqz-KE-bpKQ');
+  const before = store.getState();
+  assert.throws(() => store.take(asset, undefined, stagedRevision), /Program changed/);
+  assert.throws(() => store.goLive(stagedRevision), /Program changed/);
+  assert.deepEqual(store.getState(), before);
 });
 
 test("rejects invalid video IDs without mutating state", () => {
@@ -84,4 +98,5 @@ test("rejects incomplete assets without mutating state", () => {
   );
   assert.equal(store.getState().revision, 0);
   assert.equal(store.getState().mode, "live");
+  assert.deepEqual(store.getState().scene, { kind: 'main' });
 });
