@@ -1,6 +1,7 @@
 export type ProgramMode = "live" | "graphic";
 export type InputSource = 'youtube' | 'phone1' | 'phone2' | 'phone3' | 'phone4' | 'director';
 export type CameraSource = Exclude<InputSource, 'youtube'>;
+export type ImageMotion = 'auto' | 'still';
 
 export interface InputAudioLevel { volume: number; muted: boolean }
 export interface ProgramAudio {
@@ -15,6 +16,7 @@ export interface PresentationSettings {
   size: 'small' | 'medium' | 'large';
   transition: 'cut' | 'fade' | 'slide';
   fit: 'contain' | 'cover';
+  motion: ImageMotion;
 }
 
 export interface Asset {
@@ -29,10 +31,20 @@ export interface Asset {
   licenseUrl?: string;
 }
 
+/**
+ * Canonical visual scene for the first switcher slice. Legacy `mode`,
+ * `activeAsset`, and `presentation` remain on ProgramState during migration,
+ * but new rendering should prefer this scene field.
+ */
+export type ProgramScene =
+  | { kind: 'main' }
+  | { kind: 'image'; asset: Asset; presentation: PresentationSettings };
+
 export interface ProgramState {
   videoId: string | null;
   source: InputSource;
   audio: ProgramAudio;
+  scene: ProgramScene;
   mode: ProgramMode;
   activeAsset: Asset | null;
   revision: number;
