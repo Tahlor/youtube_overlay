@@ -8,7 +8,7 @@ const evidence = process.env.EVIDENCE_DIR ?? '.playback-evidence'; mkdirSync(evi
 const temp = mkdtempSync(path.join(tmpdir(), 'overlay-playback-'));
 let server, port = '0';
 async function start() {
-  server = spawn(process.execPath, ['dist-server/server/index.js'], { env: { ...process.env, PORT: port, HOST: '127.0.0.1', BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['dist-server/server/index.js'], { env: { ...process.env, NODE_ENV: 'test', PORT: port, HOST: '127.0.0.1', BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') }, stdio: ['ignore', 'pipe', 'pipe'] });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Startup timeout')), 10000);
     server.stdout.on('data', chunk => { const match = String(chunk).match(/127.0.0.1:(\d+)/); if (match) { clearTimeout(timer); port = match[1]; resolve(`http://127.0.0.1:${port}/youtube_overlay`); } });
@@ -19,7 +19,6 @@ async function stop() { if (server?.exitCode === null) await new Promise(resolve
 const base = process.env.BASE_URL ?? await start();
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/usr/local/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-if (process.env.DIRECTOR_ACCESS_KEY) await context.addInitScript(key => localStorage.setItem('overlay-director-access', key), process.env.DIRECTOR_ACCESS_KEY);
 // A deterministic IFrame API validates commands and recovery without claiming real YouTube media playback.
 await context.addInitScript(() => {
   window.__players = [];
@@ -83,10 +82,11 @@ try {
   if (!process.env.BASE_URL) { await stop(); await start(); await director.getByText('Connected', { exact: true }).waitFor(); await Promise.all([director.reload({ waitUntil: 'domcontentloaded' }), output.reload({ waitUntil: 'domcontentloaded' })]); await waitPosition(output, 300); }
   record('Paused position restores after both browser reloads and an isolated real server restart');
   await director.getByRole('button', { name: '▶ Play', exact: true }).click(); await waitPosition(output, 300, 1);
-  await output.waitForTimeout(2500); await output.evaluate(() => window.__players.at(-1).pauseVideo());
+  await director.waitForTimeout(2500); await director.evaluate(() => window.__players.at(-1).pauseVideo());
   await director.getByRole('button', { name: '▶ Play', exact: true }).waitFor();
-  await output.waitForTimeout(2500); await output.evaluate(() => window.__players.at(-1).seekTo(600)); await waitPosition(director, 600);
-  record('Native YouTube pause and seek also update shared playback');
+  await director.waitForTimeout(2500); await director.evaluate(() => window.__players.at(-1).seekTo(600));
+  await waitPosition(output, 600); await waitPosition(director, 600);
+  record('Native YouTube controls on the authenticated Director monitor update shared playback');
   await director.locator('h1').click();
   await director.keyboard.press('Space'); await waitPosition(output, 600, 1); await waitPosition(director, 600, 1);
   await director.getByRole('button', { name: 'Ⅱ Pause', exact: true }).waitFor();

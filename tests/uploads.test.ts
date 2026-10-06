@@ -16,7 +16,6 @@ async function start(dataPath: string, uploadPath: string) {
     env: {
       ...process.env,
       NODE_ENV: 'production',
-      DIRECTOR_ACCESS_KEY: 'upload-test-key',
       PORT: '0',
       HOST: '127.0.0.1',
       BASE_PATH: '/youtube_overlay',
@@ -49,7 +48,7 @@ async function upload(origin: string, body: Buffer, headers: Record<string, stri
   });
 }
 
-test('image upload requires Director access, validates bytes, persists, deduplicates, and survives restart', { timeout: 25_000 }, async () => {
+test('image upload requires SSO Director identity, validates bytes, persists, deduplicates, and survives restart', { timeout: 25_000 }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'overlay-upload-'));
   const dataPath = path.join(dir, 'state.sqlite');
   const uploadPath = path.join(dir, 'uploads');
@@ -57,13 +56,13 @@ test('image upload requires Director access, validates bytes, persists, deduplic
   try {
     running = await start(dataPath, uploadPath);
 
-    const denied = await upload(running.origin, ONE_PIXEL_PNG);
+    const denied = await upload(running.origin, ONE_PIXEL_PNG, { 'X-Director-Access-Key': 'legacy-key-is-not-valid' });
     assert.equal(denied.status, 401);
 
-    const disguised = await upload(running.origin, Buffer.from('not a png'), { 'X-Director-Access-Key': 'upload-test-key' });
+    const disguised = await upload(running.origin, Buffer.from('not a png'), { 'X-Auth-Request-User': 'director@example.test' });
     assert.equal(disguised.status, 415);
 
-    const accepted = await upload(running.origin, ONE_PIXEL_PNG, { 'X-Director-Access-Key': 'upload-test-key' });
+    const accepted = await upload(running.origin, ONE_PIXEL_PNG, { 'X-Auth-Request-User': 'director@example.test' });
     assert.equal(accepted.status, 201);
     const first = await accepted.json() as { asset: Asset };
     assert.equal(first.asset.title, 'Pasted image.png');
@@ -73,18 +72,18 @@ test('image upload requires Director access, validates bytes, persists, deduplic
     const bytes = Buffer.from(await (await fetch(running.origin + first.asset.fullUrl)).arrayBuffer());
     assert.deepEqual(bytes, ONE_PIXEL_PNG);
 
-    const duplicate = await upload(running.origin, ONE_PIXEL_PNG, { 'X-Director-Access-Key': 'upload-test-key' });
+    const duplicate = await upload(running.origin, ONE_PIXEL_PNG, { 'X-Auth-Request-User': 'director@example.test' });
     assert.equal(duplicate.status, 200);
     const second = await duplicate.json() as { asset: Asset };
     assert.equal(second.asset.id, first.asset.id);
 
-    const beforeRestart = await (await fetch(`${running.origin}/youtube_overlay/api/library`)).json() as Library;
+    const beforeRestart = await (await fetch(`${running.origin}/youtube_overlay/api/library`, { headers: { 'X-Auth-Request-User': 'director@example.test' } })).json() as Library;
     assert.equal(beforeRestart.uploads.length, 1);
     assert.equal(beforeRestart.uploads[0].asset.id, first.asset.id);
 
     await stop(running.child);
     running = await start(dataPath, uploadPath);
-    const afterRestart = await (await fetch(`${running.origin}/youtube_overlay/api/library`)).json() as Library;
+    const afterRestart = await (await fetch(`${running.origin}/youtube_overlay/api/library`, { headers: { 'X-Auth-Request-User': 'director@example.test' } })).json() as Library;
     assert.equal(afterRestart.uploads.length, 1);
     assert.equal(afterRestart.uploads[0].asset.id, first.asset.id);
     assert.equal((await fetch(running.origin + first.asset.fullUrl)).status, 200);

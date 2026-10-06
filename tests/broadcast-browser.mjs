@@ -9,14 +9,13 @@ const evidence = process.env.EVIDENCE_DIR ?? '.broadcast-evidence'; mkdirSync(ev
 const temp = mkdtempSync(path.join(tmpdir(), 'overlay-broadcast-'));
 let server;
 const base = await new Promise((resolve, reject) => {
-  server = spawn(process.execPath, ['dist-server/server/index.js'], { env: { ...process.env, PORT: '0', HOST: '127.0.0.1', BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['dist-server/server/index.js'], { env: { ...process.env, NODE_ENV: 'test', PORT: '0', HOST: '127.0.0.1', BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') }, stdio: ['ignore', 'pipe', 'pipe'] });
   const timer = setTimeout(() => reject(new Error('Startup timeout')), 10000);
   server.stdout.on('data', chunk => { const match = String(chunk).match(/127.0.0.1:(\d+)/); if (match) { clearTimeout(timer); resolve(`http://127.0.0.1:${match[1]}/youtube_overlay`); } });
   server.once('exit', code => { clearTimeout(timer); reject(new Error(`Server exited ${code}`)); });
 });
 const browser = await chromium.launch({ executablePath: '/usr/local/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
-if (process.env.DIRECTOR_ACCESS_KEY) await context.addInitScript(key => localStorage.setItem('overlay-director-access', key), process.env.DIRECTOR_ACCESS_KEY);
 await context.addInitScript(() => {
   window.__players = [];
   window.YT = { Player: class {
@@ -67,6 +66,8 @@ try {
   const corner = director.getByLabel('Corner', { exact: true });
   const transition = director.getByLabel('Transition', { exact: true });
   for (const name of ['shoulder', 'pip', 'image']) {
+    await director.getByRole('button', { name: 'Load built-in test graphic', exact: true }).click();
+    await director.waitForFunction(() => !document.querySelector('.take-button').disabled);
     await layout.selectOption(name); await transition.selectOption('fade');
     if (name === 'shoulder') {
       await director.getByRole('button', { name: 'Ⅱ Pause', exact: true }).click();
@@ -75,6 +76,9 @@ try {
       await director.getByRole('button', { name: '▶ Play', exact: true }).click();
       await director.getByRole('button', { name: 'Ⅱ Pause', exact: true }).waitFor();
       assert.equal(await layout.inputValue(), 'shoulder');
+      await director.getByRole('button', { name: 'Load built-in test graphic', exact: true }).click();
+      await director.waitForFunction(() => !document.querySelector('.take-button').disabled);
+      await layout.selectOption(name); await transition.selectOption('fade');
     }
     await director.locator('.take-button').click();
     await output.waitForFunction(name => document.querySelector('.output-shell')?.dataset.layout === name, name);
@@ -97,9 +101,10 @@ try {
   await output.evaluate(() => document.exitFullscreen());
   await output.waitForTimeout(500);
   record('Image-only mode exposes autoplay recovery above the graphic; fullscreen includes the entire composition');
-  await layout.selectOption('pip');
   for (const position of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
-    await corner.selectOption(position); await director.locator('.take-button').click();
+    await director.getByRole('button', { name: 'Load built-in test graphic', exact: true }).click();
+    await director.waitForFunction(() => !document.querySelector('.take-button').disabled);
+    await layout.selectOption('pip'); await corner.selectOption(position); await director.locator('.take-button').click();
     await output.waitForFunction(position => document.querySelector('.output-shell')?.dataset.corner === position, position);
     await output.waitForTimeout(450);
     const box = await output.locator('iframe').boundingBox();

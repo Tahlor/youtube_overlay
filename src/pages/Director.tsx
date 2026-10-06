@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, CameraSource, InputSource, PlaybackSample, PresentationSettings } from "../shared/types";
 import { DEFAULT_PRESENTATION, imageMotionVariant } from "../shared/presentation";
 import { CAMERA_SOURCES, INPUT_SOURCES, effectiveAudioSource } from "../shared/input";
@@ -13,25 +13,13 @@ import { useInputReceiver } from "../media/useInputReceiver";
 import { useBroadcaster } from "../media/useBroadcaster";
 import { YouTubePlayer } from "../components/YouTubePlayer";
 import { appPath } from "../basePath";
+import { claimDirectorSocket } from "../directorAuth";
 import "./director.css";
 
 export function Director() {
   const { program, connected, clockOffset, outputPlayback } = useProgram();
-  const [accessKey, setAccessKey] = useState(() => {
-    const url = new URL(window.location.href);
-    const fragment = new URLSearchParams(url.hash.replace(/^#/, ''));
-    const supplied = fragment.get('access');
-    if (supplied) {
-      window.localStorage.setItem('overlay-director-access', supplied);
-      fragment.delete('access');
-      url.hash = fragment.toString();
-      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
-      return supplied;
-    }
-    return window.localStorage.getItem('overlay-director-access') ?? '';
-  });
-  const [accessDraft, setAccessDraft] = useState(accessKey);
   const [directorClaimed, setDirectorClaimed] = useState(false);
+  const [directorUser, setDirectorUser] = useState<string | null>(null);
   const [videoInput, setVideoInput] = useState("");
   const [preview, setPreview] = useState<Asset | null>(null);
   const [previewRevision, setPreviewRevision] = useState(program.revision);
@@ -56,8 +44,6 @@ export function Director() {
   const audioLevelRef = useRef(audioLevels);
   const cameraPreview = useRef<HTMLVideoElement>(null);
   const localPreview = useRef<HTMLVideoElement>(null);
-  const phoneInvitesDetails = useRef<HTMLDetailsElement>(null);
-  const directorAccessInput = useRef<HTMLInputElement>(null);
   const lastProgramSource = useRef(program.source);
   const inviteRequestVersion = useRef(0);
   const broadcaster = useBroadcaster();
@@ -78,13 +64,58 @@ export function Director() {
   }, [program.audio.levels, audioAdjusting]);
 
   useEffect(() => {
-    const claimDirector = () => socket.emit("input:director", { key: accessKey }, (result?: { ok?: boolean; error?: string }) => {
-      setDirectorClaimed(Boolean(result?.ok));
-      if (!result?.ok) setInputError(result?.error ?? "Director access could not be confirmed. Reconnect and try again.");
-      else setInputError(null);
-    });
+    // Remove the retired app key from old browsers and old #access= links.
+    try { window.localStorage.removeItem("overlay-director-access"); } catch { /* storage can be unavailable in hardened browsers */ }
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    if (fragment.has("access")) {
+      fragment.delete("access");
+      const cleanHash = fragment.toString();
+      window.history.replaceState(null, "", window.location.pathname + window.location.search + (cleanHash ? `#${cleanHash}` : ""));
+    }
+  }, []);
+
+  useEffect(() => {
+    const claimTtlMs = 90_000;
+    const renewAfterMs = 25_000;
+    let claimVersion = 0;
+    let claiming = false;
+    let disposed = false;
+    let renewalTimer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleClaim = (delay: number) => {
+      clearTimeout(renewalTimer);
+      renewalTimer = setTimeout(claimDirector, delay);
+    };
+    const claimDirector = () => {
+      if (disposed || !socket.connected) return;
+      if (claiming) { scheduleClaim(1_000); return; }
+      claiming = true;
+      const version = ++claimVersion;
+      let retryAfter = renewAfterMs;
+      void claimDirectorSocket().then(user => {
+        if (disposed || version !== claimVersion) return;
+        setDirectorClaimed(true);
+        setDirectorUser(user);
+        setInputError(null);
+      }).catch(failure => {
+        if (disposed || version !== claimVersion) return;
+        retryAfter = Math.min(5_000, claimTtlMs / 4);
+        setDirectorClaimed(false);
+        setDirectorUser(null);
+        inviteRequestVersion.current += 1;
+        setInviteLinks({});
+        setInviteBusy(false);
+        setInviteError(null);
+        setInputError(failure instanceof Error ? failure.message : "Webapps sign-in is required for Director access.");
+      }).finally(() => {
+        claiming = false;
+        if (!disposed && version === claimVersion && socket.connected) scheduleClaim(retryAfter);
+      });
+    };
     const onDisconnect = () => {
+      claimVersion += 1;
+      clearTimeout(renewalTimer);
       setDirectorClaimed(false);
+      setDirectorUser(null);
       inviteRequestVersion.current += 1;
       setInviteLinks({});
       setInviteBusy(false);
@@ -95,33 +126,24 @@ export function Director() {
     const onAvailability = (next: Partial<Record<CameraSource, boolean>>) => {
       setAvailability(current => ({ ...current, ...next }));
     };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") claimDirector();
+    };
     socket.on("connect", claimDirector);
     socket.on("disconnect", onDisconnect);
     socket.on("input:availability", onAvailability);
+    document.addEventListener("visibilitychange", onVisible);
     if (socket.connected) claimDirector();
     return () => {
+      disposed = true;
+      claimVersion += 1;
+      clearTimeout(renewalTimer);
       socket.off("connect", claimDirector);
       socket.off("disconnect", onDisconnect);
       socket.off("input:availability", onAvailability);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [accessKey]);
-
-  function saveAccessKey(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const next = accessDraft.trim();
-    window.localStorage.setItem('overlay-director-access', next);
-    setDirectorClaimed(false);
-    setAccessKey(next);
-  }
-
-  function unlockDirector() {
-    const details = phoneInvitesDetails.current;
-    if (details) details.open = true;
-    window.requestAnimationFrame(() => {
-      directorAccessInput.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      directorAccessInput.current?.focus({ preventScroll: true });
-    });
-  }
+  }, []);
 
   useEffect(() => {
     const previous = lastProgramSource.current;
@@ -170,7 +192,7 @@ export function Director() {
 
   function setVideo() {
     if (!directorClaimed) {
-      setError("Unlock Director before changing the program.");
+      setError("Webapps sign-in is required before changing the program.");
       return;
     }
     const videoId = parseYouTubeVideoId(videoInput);
@@ -192,7 +214,7 @@ export function Director() {
   async function startDirectorInput() {
     setInputError(null);
     try {
-      await broadcaster.start({ source: "director", directorKey: accessKey });
+      await broadcaster.start({ source: "director" });
     } catch (failure) {
       setInputError((failure as Error).message || "Could not start the director camera.");
     }
@@ -398,11 +420,9 @@ export function Director() {
           <span className={`connection ${connected ? "online" : "offline"}`}>
             {connected ? "Connected" : "Reconnecting…"}
           </span>
-          {!directorClaimed && (
-            <button type="button" className="secondary-button unlock-director" onClick={unlockDirector} title="Enter the Director access key">
-              Unlock Director
-            </button>
-          )}
+          <span className={`connection ${directorClaimed ? "online" : "offline"}`} title="Authenticated by Webapps/SSO">
+            {directorClaimed ? `SSO · ${directorUser ?? "Director"}` : "Checking SSO…"}
+          </span>
           <a className="secondary-button" href={appPath("output")} target="_blank" rel="noreferrer" title="Open TV presentation screen in a new window">
             Open TV output
           </a>
@@ -691,15 +711,11 @@ export function Director() {
             </div>
           </details>
 
-          <details className="phone-invites" ref={phoneInvitesDetails}>
+          <details className="phone-invites">
             <summary>Phone camera links</summary>
             <div className="phone-invite-content">
               <p>Each link is private to this session and opens one assigned phone input.</p>
-              {!directorClaimed && <form className="director-access" onSubmit={saveAccessKey}>
-                <label htmlFor="director-access-key">Director access key</label>
-                <input ref={directorAccessInput} id="director-access-key" type="password" autoComplete="off" value={accessDraft} onChange={event => setAccessDraft(event.target.value)} />
-                <button type="submit">Unlock Director</button>
-              </form>}
+              {!directorClaimed && <p className="input-error" role="status">Webapps sign-in is required to create input links.</p>}
               <button type="button" onClick={requestPhoneInvites} disabled={!connected || !directorClaimed || inviteBusy}>
                 {inviteBusy ? "Creating links…" : Object.keys(inviteLinks).length ? "Refresh phone links" : "Create phone links"}
               </button>

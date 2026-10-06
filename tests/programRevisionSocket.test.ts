@@ -9,7 +9,7 @@ import type { CommandAck, ProgramState } from '../src/shared/types.js';
 
 async function start(dataPath: string) {
   const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
-    env: { ...process.env, PORT: '0', HOST: '127.0.0.1', BASE_PATH: '', DATA_PATH: dataPath },
+    env: { ...process.env, NODE_ENV: 'test', PORT: '0', HOST: '127.0.0.1', BASE_PATH: '', DATA_PATH: dataPath },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const url = await new Promise<string>((resolve, reject) => {
@@ -35,6 +35,12 @@ async function connect(url: string) {
     socket.once('connect_error', error => { socket.disconnect(); reject(error); });
     socket.connect();
   });
+  const claim = await fetch(`${url}/api/director/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ socketId: socket.id }),
+  });
+  assert.equal(claim.status, 200);
   return { socket, initial };
 }
 

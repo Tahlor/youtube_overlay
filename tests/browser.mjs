@@ -10,7 +10,7 @@ const observations=[];
 function record(message,data) { observations.push({message,...(data?{data}:{})}); console.log(message,data??''); }
 let server, temp, port='0';
 async function start() {
-  server=spawn(process.execPath,['dist-server/server/index.js'],{env:{...process.env,HOST:'127.0.0.1',PORT:port,BASE_PATH:prefix,DATA_PATH:path.join(temp,'overlay.sqlite')},stdio:['ignore','pipe','pipe']});
+  server=spawn(process.execPath,['dist-server/server/index.js'],{env:{...process.env,NODE_ENV:'test',HOST:'127.0.0.1',PORT:port,BASE_PATH:prefix,DATA_PATH:path.join(temp,'overlay.sqlite')},stdio:['ignore','pipe','pipe']});
   return new Promise((resolve,reject)=>{
     const timer=setTimeout(()=>reject(new Error('Candidate did not start')),10000);
     server.stdout.on('data',chunk=>{const match=String(chunk).match(/http:\/\/127.0.0.1:(\d+)/);if(match){port=match[1];clearTimeout(timer);resolve(`http://127.0.0.1:${port}${prefix}`);}});
@@ -21,7 +21,6 @@ async function stop() { if(server?.exitCode===null) await new Promise(resolve=>{
 const base=process.env.BASE_URL?.replace(/\/$/,'') ?? await (async()=>{temp=mkdtempSync(path.join(tmpdir(),'overlay-browser-'));return start();})();
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH??'/usr/local/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
 const directorContext=await browser.newContext({viewport:{width:1440,height:1100}});
-if (process.env.DIRECTOR_ACCESS_KEY) await directorContext.addInitScript(key => localStorage.setItem('overlay-director-access', key), process.env.DIRECTOR_ACCESS_KEY);
 const outputContext=await browser.newContext({viewport:{width:1440,height:900}});
 const director=await directorContext.newPage(),output=await outputContext.newPage();
 const pageErrors=[];for(const page of [director,output]) page.on('pageerror',error=>pageErrors.push(error.message));
@@ -53,6 +52,8 @@ try {
   await screenshot('01-graphic');
   if(await director.locator('.live-button').isEnabled())await director.locator('.live-button').click();await waitMode('live');
   assert.equal(await output.locator('iframe').getAttribute('data-acceptance-identity'),'original-player');
+  await director.getByRole('button',{name:'Load built-in test graphic',exact:true}).click();
+  await director.waitForFunction(()=>!document.querySelector('.take-button').disabled);
   await director.locator('.take-button').click();await waitMode('graphic');
   assert.equal(await output.locator('iframe').getAttribute('data-acceptance-identity'),'original-player');
   record('TAKE displays loaded image plus visible YouTube; LIVE restores layout without remounting player',playerBox);
@@ -103,12 +104,17 @@ try {
   record('Browser network loss shows reconnect state and catches up to latest Program after network recovery');
   await director.getByRole('button',{name:'Load built-in test graphic',exact:true}).click();
   await director.waitForFunction(()=>!document.querySelector('.take-button').disabled);
-  for(let i=0;i<5;i++){await director.locator('.take-button').click();await waitMode('graphic');if(await director.locator('.live-button').isEnabled())await director.locator('.live-button').click();await waitMode('live');}
+  for(let i=0;i<5;i++){
+    if(i>0){await director.getByRole('button',{name:'Load built-in test graphic',exact:true}).click();await director.waitForFunction(()=>!document.querySelector('.take-button').disabled);}
+    await director.locator('.take-button').click();await waitMode('graphic');
+    if(await director.locator('.live-button').isEnabled())await director.locator('.live-button').click();await waitMode('live');
+  }
   record('Five repeated TAKE/LIVE cycles complete');
   await director.route('**/api/images/search/stream?*',route=>route.fulfill({status:502,contentType:'application/json',body:JSON.stringify({error:'Acceptance test: provider unavailable'})}));
   await director.getByLabel('Search images').fill('provider outage');await director.getByRole('button',{name:'Search',exact:true}).click();
   await director.getByText('Acceptance test: provider unavailable').waitFor();
   assert.equal(await director.locator('.live-button').isVisible(),true);
+  await director.getByRole('button',{name:'Load built-in test graphic',exact:true}).click();await director.waitForFunction(()=>!document.querySelector('.take-button').disabled);
   await director.locator('.take-button').click();await waitMode('graphic');if(await director.locator('.live-button').isEnabled())await director.locator('.live-button').click();await waitMode('live');
   await director.unroute('**/api/images/search/stream?*');
   await director.route('**/api/images/search/stream?*',route=>route.fulfill({status:200,contentType:'application/x-ndjson',body:JSON.stringify({type:'done',cursor:null,hasMore:false,providers:[]})+'\n'}));

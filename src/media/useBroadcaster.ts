@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CameraSource } from '../shared/types';
 import { socket } from '../socket';
+import { claimDirectorSocket } from '../directorAuth';
 import { iceServers } from './ice';
 
 export type BroadcasterStatus = 'idle' | 'requesting' | 'connecting' | 'ready' | 'reconnecting' | 'error';
@@ -8,7 +9,6 @@ export type BroadcasterStatus = 'idle' | 'requesting' | 'connecting' | 'ready' |
 export interface BroadcasterOptions {
   source: CameraSource;
   token?: string;
-  directorKey?: string;
 }
 
 interface JoinAck {
@@ -116,19 +116,15 @@ export function useBroadcaster() {
       };
 
       if (options.source === 'director') {
-        // Socket IDs and their authorization expire on reconnect. Claim before
-        // rejoining, regardless of the order of the Director's connect listeners.
-        socket.timeout(8000).emit('input:director', { key: options.directorKey }, (timeout: Error | null, response?: JoinAck) => {
-          if (timeout || !response?.ok) {
-            ack(timeout, response);
-            return;
-          }
+        // Socket IDs and their SSO authorization expire on reconnect. Reclaim
+        // this specific socket before rejoining regardless of listener order.
+        void claimDirectorSocket().then(() => {
           if (socket.id !== socketId || optionsRef.current !== options || streamRef.current !== stream) {
             reject(new Error('The camera session changed while connecting.'));
             return;
           }
           socket.timeout(8000).emit('input:join-director', { source: options.source }, ack);
-        });
+        }).catch(reject);
       } else if (options.token) {
         socket.timeout(8000).emit('input:join', { source: options.source, token: options.token }, ack);
       } else {

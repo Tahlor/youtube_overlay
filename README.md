@@ -105,7 +105,7 @@ To test an already deployed target:
 BASE_URL=https://taylorarchibald.com/youtube_overlay EVIDENCE_DIR=/tmp/overlay-evidence npm run test:browser
 ```
 
-Set `DIRECTOR_ACCESS_KEY` in the test process for an authenticated production target. This test changes shared Program and finishes in LIVE. Server-restart validation on an external target requires `RESTART_SERVICE=app-youtube-overlay.service` and local sudo access. Autoplay event handling is also exercised with a clearly labeled simulated API event; real YouTube observations are recorded separately. Actual playback and audible sound depend on YouTube and the viewing browser.
+The browser suites use an isolated local server. The live Director is protected by the host's Webapps SSO; Output remains public. This test changes Program and finishes in LIVE. Server-restart validation on an external target requires `RESTART_SERVICE=app-youtube-overlay.service` and local sudo access. Autoplay event handling is also exercised with a clearly labeled simulated API event; real YouTube observations are recorded separately. Actual playback and audible sound depend on YouTube and the viewing browser.
 
 ## MVP status
 
@@ -125,7 +125,7 @@ Run `npm run test:broadcast` after a build to validate desktop geometry, all thr
 
 ## Live inputs
 
-Director has four phone slots and its own webcam slot. In production, Director switching, image TAKE/LIVE, sync controls and camera invites require a Director access key. The public Output retains native YouTube transport controls. If `DIRECTOR_ACCESS_KEY` is unset, the server generates one in `data/director-access-key` with owner-only permissions; open Director with `#access=KEY` once or enter it under **Phone camera links**. The browser stores it locally and removes the fragment from the address bar. Copy an invite from a phone slot and open it on that phone over HTTPS. Each invite belongs to one slot and to the current server session; restarting the server invalidates the link. A phone requests camera and microphone access only when **Start** is pressed. The Director webcam works the same way. The local Director preview is muted.
+Director has four phone slots and its own webcam slot. Director access uses the host's Webapps SSO; there is no app-specific Director key. Anyone can open the TV Output, while only the signed-in Director can change Program, manage Favorites, or generate phone input links. Copy an invite from a phone slot and open it on that phone over HTTPS. Each invite is source-specific, belongs to the current server session, and expires when that session restarts. A phone requests camera and microphone access only when **Start** is pressed. The Director webcam works the same way. The local Director preview is muted.
 
 Choose a connected input to put it on Output. Camera inputs are live, so YouTube pause, rewind, fast forward and seek apply only when YouTube is selected. Switching away records the last YouTube playback position; switching back resumes from that position. A selected camera disconnect returns Output to the saved YouTube feed. If only one viewer’s WebRTC route fails or times out, that viewer shows the saved YouTube feed with a connection error and **Retry camera**; the public viewer cannot change the shared Program. **Start camera** and **Start audio** recover blocked autoplay, including when an image is on air. Existing shoulder, picture in picture, image-only layouts and transitions use whichever input is selected.
 

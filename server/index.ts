@@ -11,7 +11,7 @@ import { ProgramStore } from './programState.js';
 import { LibraryStore } from './library.js';
 import { createImageSearchRouter } from './imageSearch.js';
 import { LdsLibraryProvider } from './ldsLibrary.js';
-import { attachInputSignaling, directorAccessKey } from './inputSignaling.js';
+import { attachInputSignaling } from './inputSignaling.js';
 import { createUploadRouter } from './uploads.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
@@ -22,7 +22,7 @@ const httpServer = http.createServer(app);
 const io = new Server(httpServer, { path: `${basePath}/socket.io`, maxHttpBufferSize: 32000 });
 const dataPath = process.env.DATA_PATH ?? path.resolve('data/overlay.sqlite');
 const uploadPath = process.env.UPLOAD_PATH ?? path.join(path.dirname(dataPath), 'uploads');
-const directorKey = directorAccessKey(dataPath);
+const directorClaimTtlMs = Number.parseInt(process.env.DIRECTOR_CLAIM_TTL_MS ?? '', 10);
 let library: LibraryStore | null = null;
 let persistenceError = false;
 try { library = new LibraryStore(dataPath); }
@@ -35,7 +35,7 @@ let outputPlayback: (OutputPlayback & { socketId: string }) | null = null;
 let lastPlaybackSave = 0;
 const inputSignaling = attachInputSignaling(io, program, {
   basePath,
-  directorKey,
+  ...(Number.isSafeInteger(directorClaimTtlMs) && directorClaimTtlMs >= 100 ? { directorClaimTtlMs } : {}),
   onSelectedCameraDisconnected: source => {
     if (program.getState().source === source) {
       // ProgramStore retains the last saved YouTube position while a camera is on air.
@@ -51,20 +51,33 @@ app.use(`${basePath}/api`, (_req,res,next) => { res.set('Cache-Control', 'no-sto
 app.get(`${basePath}/api/healthz`, (_req, res) => {
   res.json({ ok: true, revision: program.getState().revision, persistence: library && !persistenceError ? 'ok' : 'unavailable', build });
 });
+app.post(`${basePath}/api/director/claim`, requireSsoIdentity, (req, res) => {
+  const socketId = req.body?.socketId;
+  if (typeof socketId !== 'string' || !socketId || socketId.length > 128) {
+    res.status(400).json({ error: 'A current Director connection is required.' });
+    return;
+  }
+  const identity = res.locals.ssoUser as string;
+  if (!inputSignaling.claimDirector(socketId, identity)) {
+    res.status(409).json({ error: 'Director connection changed. Reconnect and try again.' });
+    return;
+  }
+  res.json({ ok: true, user: identity });
+});
 
 const ldsPath = process.env.LDS_PATH ?? path.resolve('data/lds');
 const lds = new LdsLibraryProvider(path.join(ldsPath, 'lds.sqlite'), `${basePath}/lds-media`);
 for (const dir of ['images', 'thumbs']) {
   app.use(`${basePath}/lds-media/${dir}`, express.static(path.join(ldsPath, dir), { index: false, dotfiles: 'deny', maxAge: '30d', immutable: true }));
 }
-app.use(`${basePath}/api/images`, createImageSearchRouter(lds.available ? { lds } : {}));
-app.get(`${basePath}/api/library`, (_req,res) => {
+app.use(`${basePath}/api/images`, requireSsoIdentity, createImageSearchRouter(lds.available ? { lds } : {}));
+app.get(`${basePath}/api/library`, requireSsoIdentity, (_req,res) => {
   try {
     if (!library) throw new Error();
     res.json(library.list());
   } catch { persistenceError = true; res.status(503).json({ error: 'Saved assets unavailable. Program controls still work.' }); }
 });
-app.post(`${basePath}/api/library/favorite`, (req,res) => {
+app.post(`${basePath}/api/library/favorite`, requireSsoIdentity, (req,res) => {
   let asset;
   try {
     asset = normalizeAsset(req.body?.asset);
@@ -81,13 +94,16 @@ app.use(`${basePath}/uploads`, createUploadRouter({
   uploadDir: uploadPath,
   publicBasePath: basePath,
   library,
-  directorKey,
+  isDirectorRequest: req => ssoIdentity(req) !== null,
   onChanged: () => io.emit('library:changed'),
 }));
 
 const webDist = path.resolve('dist');
 app.use(basePath || '/', express.static(webDist, { index: false }));
-app.get([`${basePath}/`, `${basePath}/director`, `${basePath}/output`, `${basePath}/phone`], (_req,res) => {
+app.get(`${basePath}/director`, requireSsoIdentity, (_req,res) => {
+  res.set('Cache-Control', 'no-store').sendFile(path.join(webDist, 'index.html'));
+});
+app.get([`${basePath}/`, `${basePath}/output`, `${basePath}/phone`], (_req,res) => {
   res.set('Cache-Control', 'no-store').sendFile(path.join(webDist, 'index.html'));
 });
 app.use((error: { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -128,6 +144,7 @@ io.on('connection', socket => {
   });
   socket.on('program:playback', (payload: PlaybackCommand, ack?: unknown) => {
     runCommand(ack, () => {
+      requireDirector(socket.id);
       const observed = freshOutput();
       const position = observed && observed.duration > 0 && [0, 1, 2, 3].includes(observed.playerState) ? observed.currentTime + (observed.playerState === 1 ? (Date.now() - observed.receivedAt) / 1000 : 0) : undefined;
       return program.controlPlayback(payload, position, observed?.duration);
@@ -145,7 +162,7 @@ io.on('connection', socket => {
   });
   socket.on('program:set-source', (payload: { source?: unknown }, ack?: unknown) => {
     runCommand(ack, () => {
-      if (!inputSignaling.isDirector(socket.id)) throw new Error('Director access is required to switch inputs.');
+      requireDirector(socket.id);
       if (!isInputSource(payload?.source)) throw new Error('Choose a valid input source.');
       if (payload.source !== 'youtube' && !inputSignaling.isAvailable(payload.source)) throw new Error('This camera input is offline.');
       const state = program.getState();
@@ -158,7 +175,7 @@ io.on('connection', socket => {
   });
   socket.on('program:set-audio', (payload: unknown, ack?: unknown) => {
     runCommand(ack, () => {
-      if (!inputSignaling.isDirector(socket.id)) throw new Error('Director access is required to change audio.');
+      requireDirector(socket.id);
       return program.setAudio(payload as Parameters<ProgramStore['setAudio']>[0]);
     });
   });
@@ -216,7 +233,25 @@ function runCommand(ack: unknown, command: () => ProgramState, taken = false) {
   if (typeof ack === 'function') ack(result);
 }
 function requireDirector(socketId: string): void {
-  if (directorKey !== null && !inputSignaling.isDirector(socketId)) throw new Error('Director access is required.');
+  if (!inputSignaling.isDirector(socketId)) throw new Error('Director sign-in is required.');
+}
+function ssoIdentity(req: express.Request): string | null {
+  const supplied = req.get('x-auth-request-user')?.trim();
+  if (supplied && supplied.length <= 320 && !/[\x00-\x1f\x7f]/.test(supplied)) return supplied;
+  if (process.env.NODE_ENV !== 'production') {
+    const development = process.env.DEV_SSO_USER?.trim();
+    return development && development.length <= 320 ? development : 'local-director';
+  }
+  return null;
+}
+function requireSsoIdentity(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const identity = ssoIdentity(req);
+  if (!identity) {
+    res.status(401).json({ error: 'Webapps sign-in is required for Director access.' });
+    return;
+  }
+  res.locals.ssoUser = identity;
+  next();
 }
 function audioSettingsDiffer(next: ProgramState, previous: ProgramState): boolean {
   if (next.audio.followSelected !== previous.audio.followSelected || next.audio.source !== previous.audio.source) return true;

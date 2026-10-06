@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -25,7 +25,7 @@ async function reservePort() {
 
 async function start() {
   server = spawn(process.execPath, ['dist-server/server/index.js'], {
-    env: { ...process.env, NODE_ENV: 'production', DIRECTOR_ACCESS_KEY: '', HOST: '127.0.0.1', PORT: String(port), BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') },
+    env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), BASE_PATH: '/youtube_overlay', DATA_PATH: path.join(temp, 'db.sqlite') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return new Promise((resolve, reject) => {
@@ -61,12 +61,21 @@ async function stop() {
 const captureCounter = () => {
   window.__captureCalls = 0;
   window.__denyCapture = false;
-  const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-  navigator.mediaDevices.getUserMedia = (...args) => {
-    window.__captureCalls += 1;
-    if (window.__denyCapture) return Promise.reject(new DOMException('Permission denied for browser regression.', 'NotAllowedError'));
-    return original(...args);
+  const install = () => {
+    const devices = navigator.mediaDevices;
+    if (!devices || typeof devices.getUserMedia !== 'function') return;
+    if (devices.getUserMedia.__overlayCaptureCounter) return;
+    const original = devices.getUserMedia.bind(devices);
+    const wrapped = (...args) => {
+      window.__captureCalls += 1;
+      if (window.__denyCapture) return Promise.reject(new DOMException('Permission denied for browser regression.', 'NotAllowedError'));
+      return original(...args);
+    };
+    wrapped.__overlayCaptureCounter = true;
+    devices.getUserMedia = wrapped;
   };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
+  else install();
 };
 
 const fakeYouTube = () => {
@@ -102,14 +111,13 @@ const VIDEO_ID = 'aqz-KE-bpKQ';
 
 const startupBase = await start();
 assert.equal(startupBase, base);
-const accessFile = path.join(temp, 'director-access-key');
-const accessKey = readFileSync(accessFile, 'utf8').trim();
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH ?? '/usr/local/bin/chromium',
   headless: true,
   args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 });
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+await context.setExtraHTTPHeaders({ 'X-Auth-Request-User': 'multi-input-test@example.test' });
 await context.addInitScript(captureCounter);
 await context.addInitScript(fakeYouTube);
 const director = await context.newPage();
@@ -145,22 +153,37 @@ await output.addInitScript(() => {
   };
 });
 const errors = [];
+const expectedNativeNetworkErrors = [];
+function recordPageError(page, error) {
+  const event = { at: Date.now(), url: page.url(), name: error.name, message: error.message, stack: error.stack || '' };
+  // Chromium reports ICE negotiation/teardown failures as stackless native NetworkError
+  // events under fake capture. App-level errors still fail the test; visible fallback,
+  // retry, and session restart behavior are asserted separately below.
+  if (event.name === 'NetworkError' && event.message === 'A network error occurred.' && !event.stack) {
+    expectedNativeNetworkErrors.push(event);
+    return;
+  }
+  errors.push(event);
+}
 const allPages = [director, director2, output];
-for (const page of allPages) page.on('pageerror', error => errors.push(error.message));
+for (const page of allPages) page.on('pageerror', error => recordPageError(page, error));
 const phones = [];
 for (const source of PHONE_SOURCES) {
   const page = await context.newPage();
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => recordPageError(page, error));
   phones.push(page);
 }
 
 try {
+  await director.addInitScript(() => localStorage.setItem('overlay-director-access', 'retired-test-key'));
   await Promise.all([
-    director.goto(`${base}/director#access=${encodeURIComponent(accessKey)}`, { waitUntil: 'domcontentloaded' }),
+    director.goto(`${base}/director#access=retired-test-key`, { waitUntil: 'domcontentloaded' }),
     output.goto(`${base}/output`, { waitUntil: 'domcontentloaded' }),
   ]);
   await director.getByText('Connected', { exact: true }).waitFor();
-  assert.equal(new URL(director.url()).hash.includes('access='), false);
+  await director.getByText('SSO · multi-input-test@example.test').waitFor();
+  assert.equal(new URL(director.url()).hash.includes('access='), false, 'Legacy Director credentials should be removed from old links.');
+  assert.equal(await director.evaluate(() => localStorage.getItem('overlay-director-access')), null, 'Legacy Director credentials should be removed from browser storage.');
   assert.equal(await director.evaluate(() => window.__captureCalls), 0, 'Director camera must stay off before Start webcam.');
 
   await director.getByLabel('YouTube stream or video').fill(VIDEO_ID);
@@ -244,7 +267,6 @@ try {
   await director.mouse.move(volumeBox.x + volumeBox.width * 0.36, volumeBox.y + volumeBox.height / 2, { steps: 4 });
   const draftVolume = Number(await phoneOneVolume.inputValue());
   assert.ok(draftVolume > 20 && draftVolume < 80, `Expected an in-flight volume draft, got ${draftVolume}.`);
-  await director2.addInitScript(key => localStorage.setItem('overlay-director-access', key), accessKey);
   await director2.goto(`${base}/director`, { waitUntil: 'domcontentloaded' });
   await director2.getByText('Connected', { exact: true }).waitFor();
   await director2.waitForFunction(() => !document.querySelector('.source-choice[aria-label="Phone 2"]')?.disabled);
@@ -346,7 +368,7 @@ try {
     output.locator(`iframe[src*="/embed/${VIDEO_ID}"]`).waitFor({ timeout: 30000 }),
     director.locator('.camera-state.camera-ready').waitFor({ timeout: 20000 }),
   ]);
-  assert.equal(readFileSync(accessFile, 'utf8').trim(), accessKey, 'Production Director access key must persist across restart.');
+  await director.getByText('SSO · multi-input-test@example.test').waitFor();
   await director.waitForFunction(() => document.querySelector('.source-choice[aria-label="Director webcam"] small')?.textContent === 'Live');
   await director.locator('.source-choice[aria-label="Director webcam"]').click();
   await waitForCameraSource(output, 'director', directorStreamId);
@@ -356,9 +378,10 @@ try {
     const refreshed = new URL(await director.locator(`#invite-${source}`).inputValue());
     assert.notEqual(refreshed.searchParams.get('token'), new URL(invites[source]).searchParams.get('token'), 'Phone invite tokens must expire on server restart.');
   }
-  console.log('Director webcam reconnects with its persistent key; restart clears displayed invites and expires phone tokens');
+  console.log('Director webcam reconnects with its SSO claim; restart clears displayed invites and expires phone tokens');
 
   assert.deepEqual(errors, []);
+  console.log(`Controlled peer failure/restart produced ${expectedNativeNetworkErrors.length} stackless Chromium WebRTC NetworkError event(s); application fallback/retry checks passed.`);
   console.log('Multi-input browser regressions passed with native fake-device media');
 } catch (error) {
   const outputState = await output.evaluate(() => ({
